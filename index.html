@@ -3,651 +3,701 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JOJOLI - Multiplayer NES</title>
-    <!-- JSNES Library for NES Emulation -->
+    <title>JOJOLI 3D ARCADE</title>
+    <!-- Three.js for 3D Environment -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- JSNES for Emulation -->
     <script src="https://unpkg.com/jsnes/dist/jsnes.min.js"></script>
+    <!-- Google Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600&display=swap" rel="stylesheet">
+
     <style>
         :root {
-            --primary: #9b59b6;
-            --secondary: #3498db;
-            --accent: #e74c3c;
-            --bg-dark: #1a1a1a;
-            --text-light: #ecf0f1;
-            --retro-green: #2ecc71;
-            --crt-scanline: rgba(18, 16, 16, 0.1);
-        }
-
-        * {
-            box-sizing: border-box;
-            user-select: none;
+            --neon-blue: #00f3ff;
+            --neon-purple: #bc13fe;
+            --glass-bg: rgba(10, 10, 20, 0.75);
+            --glass-border: rgba(255, 255, 255, 0.1);
         }
 
         body {
             margin: 0;
-            padding: 0;
-            background-color: var(--bg-dark);
-            color: var(--text-light);
-            font-family: 'Courier New', Courier, monospace;
             overflow: hidden;
-            height: 100vh;
+            background-color: #050505;
+            font-family: 'Rajdhani', sans-serif;
+            color: white;
+        }
+
+        /* --- 3D CANVAS BACKGROUND --- */
+        #world {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* --- UI OVERLAY --- */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
+            pointer-events: none; /* Let clicks pass through to 3D if needed, re-enabled for buttons */
         }
 
-        /* --- UTILITIES --- */
-        .hidden { display: none !important; }
-        .btn {
-            background: var(--primary);
-            color: white;
-            border: 4px solid #8e44ad;
-            padding: 15px 30px;
-            font-size: 1.2rem;
-            cursor: pointer;
-            font-family: inherit;
-            text-transform: uppercase;
-            box-shadow: 0 6px 0 #6c3483;
-            transition: transform 0.1s, box-shadow 0.1s;
-            margin: 10px;
+        .interactive {
+            pointer-events: auto;
         }
-        .btn:active {
-            transform: translateY(4px);
-            box-shadow: 0 2px 0 #6c3483;
-        }
-        .btn-secondary {
-            background: var(--secondary);
-            border-color: #2980b9;
-            box-shadow: 0 6px 0 #1f618d;
-        }
-        .btn-secondary:active { box-shadow: 0 2px 0 #1f618d; }
-
-        input {
-            background: #333;
-            border: 2px solid #555;
-            color: white;
-            padding: 10px;
-            font-family: inherit;
-            font-size: 1rem;
-            text-align: center;
-            outline: none;
-        }
-        input:focus { border-color: var(--primary); }
 
         /* --- INTRO SCREEN --- */
-        #intro-screen {
+        #intro {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
             background: black;
-            z-index: 1000;
+            z-index: 100;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
-            flex-direction: column;
+            transition: opacity 1s ease;
         }
 
-        .jojoli-title {
+        .title-3d {
+            font-family: 'Orbitron', sans-serif;
             font-size: 5rem;
-            font-weight: bold;
-            color: var(--primary);
-            text-shadow: 4px 4px 0px var(--secondary);
-            opacity: 0;
-            transform: scale(0.5);
-            animation: introPop 1.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            font-weight: 900;
+            color: transparent;
+            -webkit-text-stroke: 2px var(--neon-blue);
+            text-shadow: 0 0 20px var(--neon-purple);
+            letter-spacing: 10px;
+            animation: pulse 2s infinite;
         }
 
-        @keyframes introPop {
-            0% { opacity: 0; transform: scale(0.5); }
-            70% { opacity: 1; transform: scale(1.1); }
-            100% { opacity: 1; transform: scale(1); }
+        .start-btn {
+            margin-top: 50px;
+            padding: 15px 40px;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.5rem;
+            background: transparent;
+            color: var(--neon-blue);
+            border: 2px solid var(--neon-blue);
+            cursor: pointer;
+            box-shadow: 0 0 15px var(--neon-blue);
+            transition: 0.3s;
+        }
+        .start-btn:hover {
+            background: var(--neon-blue);
+            color: black;
+            box-shadow: 0 0 30px var(--neon-blue);
         }
 
-        /* --- MAIN MENU --- */
-        #menu-screen {
-            text-align: center;
-            max-width: 600px;
-            width: 90%;
-            animation: fadeIn 1s ease;
-        }
-
-        .card {
-            background: #2c3e50;
+        /* --- HUD ELEMENTS --- */
+        .hud-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--glass-border);
+            border-radius: 15px;
             padding: 30px;
-            border-radius: 10px;
-            border: 2px solid var(--primary);
-            box-shadow: 10px 10px 0px rgba(0,0,0,0.5);
+            box-shadow: 0 0 20px rgba(0, 243, 255, 0.1);
+            text-align: center;
+            max-width: 500px;
+            width: 90%;
+            transition: transform 0.3s;
         }
 
-        .logo-small {
-            font-size: 2rem;
-            color: var(--primary);
-            margin-bottom: 20px;
-            display: inline-block;
+        .hidden {
+            display: none !important;
+            opacity: 0;
         }
 
-        /* --- GAME ROOM / LOBBY --- */
-        #room-screen {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 20px;
+        h2 {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--neon-blue);
+            margin-top: 0;
         }
 
-        .status-bar {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 20px;
-            width: 100%;
-            max-width: 800px;
-            justify-content: space-between;
+        input {
             background: rgba(0,0,0,0.5);
+            border: 1px solid var(--neon-purple);
+            color: white;
             padding: 10px;
-            border-radius: 8px;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 1.2rem;
+            width: 200px;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin: 10px;
         }
 
-        .player-status {
+        .btn-action {
+            background: linear-gradient(45deg, var(--neon-purple), var(--neon-blue));
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            font-size: 1.1rem;
+            font-family: 'Orbitron', sans-serif;
+            cursor: pointer;
+            margin: 10px;
+            border-radius: 5px;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+        .btn-action:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px var(--neon-blue);
+        }
+
+        /* --- GAME HUD --- */
+        #game-hud {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 50px;
+            box-sizing: border-box;
+            pointer-events: none;
+        }
+
+        .status-box {
+            background: rgba(0,0,0,0.6);
+            border: 1px solid var(--neon-blue);
+            padding: 10px 20px;
+            border-radius: 5px;
             display: flex;
             align-items: center;
             gap: 10px;
-            font-weight: bold;
         }
 
-        .indicator {
-            width: 15px;
-            height: 15px;
+        .status-dot {
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
-            background-color: #555;
-            box-shadow: 0 0 5px #000;
+            background-color: #333;
         }
-        .indicator.online { background-color: var(--retro-green); box-shadow: 0 0 8px var(--retro-green); }
-        .indicator.offline { background-color: var(--accent); }
-
-        .game-container {
-            position: relative;
-            border: 10px solid #444;
-            border-radius: 5px;
-            box-shadow: 0 0 20px rgba(0,0,0,0.8);
-            background: black;
-            max-width: 100%;
+        .status-dot.online {
+            background-color: #0f0;
+            box-shadow: 0 0 10px #0f0;
         }
 
-        canvas {
-            display: block;
-            image-rendering: pixelated;
-            max-width: 100%;
-            max-height: 70vh;
-        }
-
-        /* CRT Overlay Effect */
-        .crt::before {
-            content: " ";
-            display: block;
+        #controls-hint {
             position: absolute;
-            top: 0;
-            left: 0;
-            bottom: 0;
-            right: 0;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-            z-index: 2;
-            background-size: 100% 2px, 3px 100%;
-            pointer-events: none;
-        }
-
-        .controls-hint {
-            margin-top: 15px;
-            font-size: 0.8rem;
-            color: #aaa;
-            text-align: center;
-            background: rgba(0,0,0,0.3);
+            bottom: 20px;
+            color: rgba(255,255,255,0.7);
+            font-size: 0.9rem;
+            background: rgba(0,0,0,0.5);
             padding: 10px;
-            border-radius: 4px;
+            border-radius: 5px;
         }
 
         .key {
-            display: inline-block;
-            background: #444;
-            padding: 2px 6px;
-            border-radius: 3px;
-            color: white;
-            margin: 0 2px;
-            border-bottom: 2px solid #222;
+            color: var(--neon-blue);
+            font-weight: bold;
+            margin: 0 5px;
         }
 
-        /* Toast Notification */
-        #toast {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #333;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 20px;
-            border: 1px solid var(--retro-green);
-            opacity: 0;
-            transition: opacity 0.3s;
-            pointer-events: none;
-            z-index: 2000;
+        /* Hidden canvas for NES logic, used as texture for Three.js */
+        #nes-canvas {
+            display: none; 
         }
 
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse {
+            0% { text-shadow: 0 0 20px var(--neon-purple); opacity: 0.8; }
+            50% { text-shadow: 0 0 40px var(--neon-blue); opacity: 1; }
+            100% { text-shadow: 0 0 20px var(--neon-purple); opacity: 0.8; }
+        }
 
     </style>
 </head>
 <body>
 
-<!-- INTRO SCREEN -->
-<div id="intro-screen">
-    <div class="jojoli-title">JOJOLI</div>
-</div>
+    <!-- 1. The 3D World Background -->
+    <div id="world"></div>
 
-<!-- MENU SCREEN -->
-<div id="menu-screen" class="hidden">
-    <div class="card">
-        <div class="logo-small">JOJOLI</div>
-        <p>Multiplayer NES Experience</p>
-        <hr style="border: 0; border-top: 1px solid #555; margin: 20px 0;">
+    <!-- 2. The NES Logic Canvas (Hidden, fed into 3D) -->
+    <canvas id="nes-canvas" width="256" height="240"></canvas>
 
-        <button class="btn" onclick="app.createRoom()">Create Room</button>
-
-        <div style="margin: 20px 0;">OR</div>
-
-        <input type="text" id="join-code-input" placeholder="Enter Friend's Code" maxlength="6" style="width: 150px; text-transform: uppercase;">
-        <button class="btn btn-secondary" onclick="app.joinRoom()">Join Room</button>
-    </div>
-</div>
-
-<!-- LOBBY / GAME SCREEN -->
-<div id="room-screen" class="hidden">
-    <div class="status-bar">
-        <div class="player-status">
-            <div id="p1-indicator" class="indicator online"></div>
-            <span>YOU (P1)</span>
+    <!-- 3. UI Overlay -->
+    <div id="ui-layer">
+        
+        <!-- Intro Screen -->
+        <div id="intro" class="interactive">
+            <div class="title-3d">JOJOLI 3D</div>
+            <p style="color: #aaa; margin-top: 10px; letter-spacing: 2px;">MULTIPLAYER EMULATION STATION</p>
+            <button class="start-btn" onclick="app.initSystem()">INITIALIZE SYSTEM</button>
         </div>
-        <div style="display: flex; flex-direction: column; align-items: center;">
-            <span id="room-code-display" style="font-size: 1.2rem; color: var(--secondary); letter-spacing: 2px;"></span>
-            <span style="font-size: 0.7rem; color: #777;">ROOM CODE</span>
+
+        <!-- Menu Screen -->
+        <div id="menu" class="hud-panel interactive hidden">
+            <h2>LOBBY</h2>
+            <p>Select Mode</p>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+                <button class="btn-action" onclick="app.createRoom()">CREATE ROOM</button>
+                <div style="display:flex; align-items:center; justify-content:center;">
+                    <input type="text" id="join-code" placeholder="ENTER CODE" maxlength="6">
+                    <button class="btn-action" style="padding: 10px 20px;" onclick="app.joinRoom()">JOIN</button>
+                </div>
+            </div>
+            <p style="font-size: 0.8rem; color: #888; margin-top: 20px;">
+                * Multiplayer requires opening a second tab in this browser.
+            </p>
         </div>
-        <div class="player-status">
-            <span id="p2-label">FRIEND (P2)</span>
-            <div id="p2-indicator" class="indicator offline"></div>
+
+        <!-- Room/Lobby Screen -->
+        <div id="room-panel" class="hud-panel interactive hidden">
+            <h2 id="room-title">WAITING FOR PLAYER</h2>
+            <div id="room-code-display" style="font-size: 2rem; font-family: 'Orbitron'; color: var(--neon-purple); letter-spacing: 5px; margin: 20px 0;">
+                ------
+            </div>
+            <p id="room-status">Share this code with your friend.</p>
+            
+            <div id="host-controls" class="hidden">
+                <hr style="border-color: rgba(255,255,255,0.1)">
+                <p>Upload ROM to Start</p>
+                <input type="file" id="rom-upload" accept=".nes" style="display:none" onchange="app.loadRom(this)">
+                <button class="btn-action" onclick="document.getElementById('rom-upload').click()">SELECT .NES FILE</button>
+            </div>
         </div>
+
+        <!-- Game HUD (Visible during gameplay) -->
+        <div id="game-hud hidden">
+            <div class="status-box">
+                <div id="p1-dot" class="status-dot online"></div>
+                <span>P1 (YOU)</span>
+            </div>
+            <div class="status-box" style="border-color: var(--neon-purple);">
+                <span id="code-mini">CODE:----</span>
+            </div>
+            <div class="status-box">
+                <span>P2 (FRIEND)</span>
+                <div id="p2-dot" class="status-dot"></div>
+            </div>
+        </div>
+
+        <div id="controls-hint" class="hidden">
+            <span class="key">Arrows</span> Move &nbsp;|&nbsp; 
+            <span class="key">Z</span> A &nbsp;|&nbsp; 
+            <span class="key">X</span> B &nbsp;|&nbsp; 
+            <span class="key">Enter</span> Start <br>
+            (P2: <span class="key">WASD</span> Move, <span class="key">F</span>/<span class="key">G</span> A/B)
+        </div>
+
     </div>
 
-    <div id="lobby-controls" class="card hidden" style="margin-bottom: 20px;">
-        <h3>Room Created!</h3>
-        <p>Share the code above with your friend.</p>
-        <p>Once they join, upload your ROM.</p>
-        <input type="file" id="rom-upload" accept=".nes" style="display:none" onchange="app.handleRomUpload(this)">
-        <button class="btn" onclick="document.getElementById('rom-upload').click()">Upload NES ROM</button>
-    </div>
+    <script>
+        /**
+         * JOJOLI 3D - Core Application
+         * Integrates Three.js visuals, BroadcastChannel networking, and JSNES emulation.
+         */
 
-    <div id="game-area" class="game-container hidden crt">
-        <canvas id="nes-canvas" width="256" height="240"></canvas>
-    </div>
+        const CHANNEL_NAME = 'jojoli_3d_v2';
 
-    <div id="controls-info" class="controls-hint hidden">
-        <strong>P1 (You):</strong> <span class="key">Arrows</span> Move <span class="key">Z</span> A <span class="key">X</span> B <span class="key">Enter</span> Start |
-        <strong>P2 (Friend):</strong> <span class="key">WASD</span> Move <span class="key">F</span> A <span class="key">G</span> B <span class="key">H</span> Start
-    </div>
-</div>
+        class JojoliApp {
+            constructor() {
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.tvScreenMesh = null;
+                this.screenTexture = null;
+                this.nes = null;
+                this.romData = null;
+                
+                // Networking
+                this.network = new BroadcastChannel(CHANNEL_NAME);
+                this.roomCode = null;
+                this.isHost = false;
+                this.p2Connected = false;
+                
+                // Input
+                this.keysPressed = {};
 
-<!-- TOAST MSG -->
-<div id="toast">Message</div>
+                this.setupThreeJS();
+                this.animate3D();
 
-<script>
-    /**
-     * JOJOLI Application Logic
-     * Handles Intro, Room Management (via BroadcastChannel), and NES Emulation.
-     */
-
-    const CHANNEL_NAME = 'jojoli_net_v1';
-
-    class JojoliApp {
-        constructor() {
-            this.screen = 'intro';
-            this.roomCode = null;
-            this.isHost = false;
-            this.nes = null;
-            this.canvas = null;
-            this.ctx = null;
-            this.networkChannel = new BroadcastChannel(CHANNEL_NAME);
-            this.romData = null;
-            this.frameId = null;
-            this.p2Connected = false;
-
-            // Input state tracking
-            this.keys = {};
-            this.p2Keys = {}; // Received from network
-
-            this.initListeners();
-            this.runIntro();
-        }
-
-        // --- NAVIGATION & INTRO ---
-
-        runIntro() {
-            // Play sound
-            if ('speechSynthesis' in window) {
-                const utterance = new SpeechSynthesisUtterance("Hello Jojoli");
-                utterance.rate = 1;
-                utterance.pitch = 1.2;
-                setTimeout(() => window.speechSynthesis.speak(utterance), 800);
+                // Network Listener Setup
+                this.network.onmessage = (e) => this.handleNetworkMessage(e.data);
             }
 
-            // Switch to menu after animation
-            setTimeout(() => {
-                document.getElementById('intro-screen').classList.add('hidden');
-                document.getElementById('menu-screen').classList.remove('hidden');
-                this.screen = 'menu';
-            }, 3500);
-        }
+            // --- THREE.JS SETUP ---
+            setupThreeJS() {
+                const container = document.getElementById('world');
+                
+                // Scene
+                this.scene = new THREE.Scene();
+                this.scene.fog = new THREE.FogExp2(0x050505, 0.02);
 
-        switchScreen(screenId) {
-            document.querySelectorAll('body > div').forEach(el => {
-                if(el.id !== 'toast') el.classList.add('hidden');
-            });
-            document.getElementById(screenId).classList.remove('hidden');
-            this.screen = screenId;
-        }
+                // Camera
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.camera.position.z = 5;
+                this.camera.position.y = 1;
 
-        showToast(msg) {
-            const t = document.getElementById('toast');
-            t.innerText = msg;
-            t.style.opacity = '1';
-            setTimeout(() => t.style.opacity = '0', 3000);
-        }
+                // Renderer
+                this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                container.appendChild(this.renderer.domElement);
 
-        // --- ROOM LOGIC ---
+                // Lighting
+                const ambientLight = new THREE.AmbientLight(0x404040, 2);
+                this.scene.add(ambientLight);
 
-        generateCode() {
-            return Math.random().toString(36).substring(2, 8).toUpperCase();
-        }
+                const pointLight = new THREE.PointLight(0x00f3ff, 1, 100);
+                pointLight.position.set(2, 5, 5);
+                this.scene.add(pointLight);
 
-        createRoom() {
-            this.isHost = true;
-            this.roomCode = this.generateCode();
-            this.setupRoomUI();
-            this.showToast("Room Created! Share the code.");
+                const purpleLight = new THREE.PointLight(0xbc13fe, 1, 100);
+                purpleLight.position.set(-2, 5, 5);
+                this.scene.add(purpleLight);
 
-            // Host listens for join requests
-            this.networkChannel.onmessage = (event) => {
-                const data = event.data;
-                if (data.type === 'JOIN_REQUEST' && data.code === this.roomCode) {
-                    // P2 Joined
-                    this.p2Connected = true;
-                    this.updateP2Status(true);
-                    this.networkChannel.postMessage({ type: 'JOIN_ACCEPT' });
-                    this.showToast("Friend connected!");
+                // --- THE TV MODEL ---
+                // Frame
+                const frameGeo = new THREE.BoxGeometry(4.2, 3.2, 0.5);
+                const frameMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 100 });
+                const frame = new THREE.Mesh(frameGeo, frameMat);
+                this.scene.add(frame);
 
-                    // If game is already running, P2 needs ROM
-                    if (this.romData) {
-                        this.networkChannel.postMessage({
-                            type: 'ROM_DATA',
-                            rom: this.romData
-                        });
-                        this.startGameLoop(); // Ensure loop is running
+                // Screen (Canvas Texture)
+                const canvas = document.getElementById('nes-canvas');
+                this.screenTexture = new THREE.CanvasTexture(canvas);
+                // Improve texture filtering for pixel art look
+                this.screenTexture.minFilter = THREE.NearestFilter;
+                this.screenTexture.magFilter = THREE.NearestFilter;
+
+                const screenGeo = new THREE.PlaneGeometry(3.8, 2.8); // 4:3 Aspect Ratio approximation
+                const screenMat = new THREE.MeshBasicMaterial({ map: this.screenTexture });
+                this.tvScreenMesh = new THREE.Mesh(screenGeo, screenMat);
+                this.tvScreenMesh.position.z = 0.26; // Slightly in front of frame
+                frame.add(this.tvScreenMesh);
+
+                // Environment: Moving Grid Floor
+                const gridHelper = new THREE.GridHelper(50, 50, 0xbc13fe, 0x111111);
+                gridHelper.position.y = -2;
+                this.scene.add(gridHelper);
+
+                // Particles
+                const particlesGeo = new THREE.BufferGeometry();
+                const particlesCount = 500;
+                const posArray = new Float32Array(particlesCount * 3);
+                for(let i = 0; i < particlesCount * 3; i++) {
+                    posArray[i] = (Math.random() - 0.5) * 20;
+                }
+                particlesGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+                const particlesMat = new THREE.PointsMaterial({ size: 0.05, color: 0x00f3ff });
+                const particlesMesh = new THREE.Points(particlesGeo, particlesMat);
+                this.scene.add(particlesMesh);
+
+                // Handle Resize
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+            }
+
+            animate3D() {
+                requestAnimationFrame(() => this.animate3D());
+                
+                // Idle camera float
+                this.camera.position.x = Math.sin(Date.now() * 0.0005) * 0.5;
+                this.camera.position.y = 1 + Math.cos(Date.now() * 0.0005) * 0.2;
+                this.camera.lookAt(0, 0, 0);
+
+                // Rotate grid slightly for effect
+                // (Note: gridHelper rotation is expensive to animate directly in vanilla JS without performance hit, kept static for performance)
+
+                this.renderer.render(this.scene, this.camera);
+            }
+
+            // --- APP LOGIC ---
+
+            initSystem() {
+                // Play intro sound
+                this.speak("System Initialized. Welcome to Jojoli 3D.");
+                
+                // Fade out intro
+                const intro = document.getElementById('intro');
+                intro.style.opacity = '0';
+                setTimeout(() => {
+                    intro.classList.add('hidden');
+                    document.getElementById('menu').classList.remove('hidden');
+                    
+                    // Move Camera to "Menu" position
+                    this.moveCameraTo(0, 0, 4);
+                }, 1000);
+            }
+
+            moveCameraTo(x, y, z) {
+                // Simple tween simulation
+                const startPos = this.camera.position.clone();
+                const endPos = new THREE.Vector3(x, y, z);
+                let alpha = 0;
+                
+                const animateCam = () => {
+                    alpha += 0.02;
+                    if (alpha > 1) alpha = 1;
+                    this.camera.position.lerpVectors(startPos, endPos, alpha);
+                    this.camera.lookAt(0,0,0);
+                    if (alpha < 1) requestAnimationFrame(animateCam);
+                };
+                animateCam();
+            }
+
+            speak(text) {
+                if ('speechSynthesis' in window) {
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.pitch = 0.8;
+                    utterance.rate = 1.1;
+                    window.speechSynthesis.speak(utterance);
+                }
+            }
+
+            showToast(msg) {
+                // Simple reuse of title or console for now to keep UI clean
+                console.log(msg);
+                const status = document.getElementById('room-status');
+                if(status) {
+                    const original = status.innerText;
+                    status.innerText = msg;
+                    status.style.color = "#00f3ff";
+                    setTimeout(() => {
+                        status.innerText = original;
+                        status.style.color = "#888";
+                    }, 3000);
+                }
+            }
+
+            // --- ROOM LOGIC ---
+
+            createRoom() {
+                this.isHost = true;
+                this.roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+                
+                document.getElementById('menu').classList.add('hidden');
+                document.getElementById('room-panel').classList.remove('hidden');
+                document.getElementById('room-code-display').innerText = this.roomCode;
+                document.getElementById('host-controls').classList.remove('hidden');
+                document.getElementById('p2-dot').classList.remove('online');
+                document.getElementById('code-mini').innerText = "CODE: " + this.roomCode;
+
+                this.moveCameraTo(0, 0, 3); // Zoom in slightly
+            }
+
+            joinRoom() {
+                const code = document.getElementById('join-code').value.toUpperCase().trim();
+                if (!code) return alert("Enter a code");
+
+                this.isHost = false;
+                this.roomCode = code;
+
+                document.getElementById('menu').classList.add('hidden');
+                document.getElementById('room-panel').classList.remove('hidden');
+                document.getElementById('room-title').innerText = "CONNECTING...";
+                document.getElementById('room-code-display').innerText = code;
+                document.getElementById('host-controls').classList.add('hidden');
+                document.getElementById('code-mini').innerText = "CODE: " + code;
+
+                // Send join request
+                this.network.postMessage({ type: 'JOIN_REQUEST', code: this.roomCode });
+            }
+
+            // --- NES LOGIC ---
+
+            loadRom(input) {
+                const file = input.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    this.romData = e.target.result; // ArrayBuffer
+                    this.startGame(this.romData);
+                    
+                    // If client connected, send ROM
+                    if (this.p2Connected) {
+                        this.network.postMessage({ type: 'ROM_TRANSFER', rom: this.romData });
                     }
-                }
-            };
-        }
-
-        joinRoom() {
-            const code = document.getElementById('join-code-input').value.trim().toUpperCase();
-            if (!code) {
-                this.showToast("Please enter a code");
-                return;
+                };
+                reader.readAsArrayBuffer(file);
             }
 
-            this.isHost = false;
-            this.roomCode = code;
-            this.setupRoomUI();
+            startGame(romArrayBuffer) {
+                // UI Transition
+                document.getElementById('room-panel').classList.add('hidden');
+                document.getElementById('game-hud').classList.remove('hidden');
+                document.getElementById('controls-hint').classList.remove('hidden');
+                
+                // Move Camera very close to screen for immersion
+                this.moveCameraTo(0, 0, 2.2);
 
-            // Client Logic
-            document.getElementById('p1-indicator').classList.remove('online'); // We don't know about P1 yet
-            document.getElementById('p2-indicator').classList.add('online'); // We are P2 visually, but logic handles it
+                // Setup JSNES
+                const canvas = document.getElementById('nes-canvas');
+                const ctx = canvas.getContext('2d');
+                const imageData = ctx.createImageData(256, 240);
 
-            this.networkChannel.onmessage = (event) => {
-                const data = event.data;
-                if (data.type === 'JOIN_ACCEPT') {
-                    this.showToast("Connected to Host!");
-                    this.updateP1Status(true);
-                } else if (data.type === 'ROM_DATA') {
-                    this.romData = data.rom;
-                    this.initEmulator(this.romData);
-                    this.showToast("ROM Received. Starting game...");
-                    this.startGameLoop(); // Client renders what host sends (conceptually)
-                } else if (data.type === 'INPUT_FRAME') {
-                    // Host sends inputs
-                    this.p2Keys = data.p2Keys; // Use inputs from Host
-                    this.handleNetworkInput(data.p1Keys, data.p2Keys);
-                } else if (data.type === 'FRAME_BUFFER') {
-                     // Experimental: Streaming video frame from Host
-                     this.drawFrame(data.imageBitmap);
-                }
-            };
+                this.nes = new jsnes.NES({
+                    onFrame: (buffer) => {
+                        // Draw to 2D canvas (used as texture)
+                        const data = imageData.data;
+                        for (let i = 0; i < buffer.length; ++i) {
+                            const col = buffer[i];
+                            data[i * 4] = col & 0xFF;
+                            data[i * 4 + 1] = (col >> 8) & 0xFF;
+                            data[i * 4 + 2] = (col >> 16) & 0xFF;
+                            data[i * 4 + 3] = 0xFF;
+                        }
+                        ctx.putImageData(imageData, 0, 0);
 
-            // Request Join
-            this.networkChannel.postMessage({ type: 'JOIN_REQUEST', code: this.roomCode });
-        }
+                        // Tell Three.js texture to update
+                        if (this.screenTexture) this.screenTexture.needsUpdate = true;
 
-        setupRoomUI() {
-            this.switchScreen('room-screen');
-            document.getElementById('room-code-display').innerText = this.roomCode;
-
-            if (this.isHost) {
-                document.getElementById('lobby-controls').classList.remove('hidden');
-                document.getElementById('p1-indicator').classList.add('online');
-            } else {
-                document.getElementById('lobby-controls').classList.add('hidden');
-                document.getElementById('p2-label').innerText = "YOU (P2)";
-                document.getElementById('p2-indicator').classList.add('online');
-            }
-        }
-
-        updateP2Status(isOnline) {
-            const el = document.getElementById('p2-indicator');
-            if (isOnline) el.classList.add('online');
-            else el.classList.remove('online');
-        }
-
-        updateP1Status(isOnline) {
-            const el = document.getElementById('p1-indicator');
-            if (isOnline) el.classList.add('online');
-            else el.classList.remove('online');
-        }
-
-        // --- GAME LOGIC ---
-
-        handleRomUpload(input) {
-            const file = input.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                this.romData = e.target.result;
-                this.initEmulator(this.romData);
-
-                // Send ROM to P2 if connected
-                if (this.p2Connected) {
-                    this.networkChannel.postMessage({ type: 'ROM_DATA', rom: this.romData });
-                }
-            };
-            reader.readAsArrayBuffer(file);
-        }
-
-        initEmulator(romData) {
-            this.canvas = document.getElementById('nes-canvas');
-            this.ctx = this.canvas.getContext('2d');
-
-            // Image Data buffer for rendering
-            this.imageData = this.ctx.createImageData(256, 240);
-
-            this.nes = new jsnes.NES({
-                onFrame: (buffer) => {
-                    const data = this.imageData.data;
-                    for (let i = 0; i < buffer.length; i++) {
-                        // NES buffer is RGBA (int32), ImageData is R,G,B,A bytes
-                        const pixel = buffer[i];
-                        data[i * 4] = pixel & 0xFF;
-                        data[i * 4 + 1] = (pixel >> 8) & 0xFF;
-                        data[i * 4 + 2] = (pixel >> 16) & 0xFF;
-                        data[i * 4 + 3] = 0xFF; // Alpha
+                        // Host streaming logic
+                        if (this.isHost && this.p2Connected) {
+                            // In a real app with WebRTC we'd send the video buffer.
+                            // For this local demo, sending inputs is enough, 
+                            // but we can stream the frame via Bitmap for "Same Screen" feel.
+                            createImageBitmap(canvas).then(bmp => {
+                                this.network.postMessage({ type: 'VIDEO_FRAME', bmp: bmp }, [bmp]);
+                            });
+                        }
+                    },
+                    onAudioSample: function(left, right) {
+                        // Audio handling omitted for single-file stability
                     }
-                    this.ctx.putImageData(this.imageData, 0, 0);
-                },
-                onAudioSample: (left, right) => {
-                    // Audio handling is complex in browser without user gesture context management.
-                    // For this demo, we focus on video sync.
-                }
-            });
+                });
 
-            this.nes.loadROM(romData);
-
-            document.getElementById('lobby-controls').classList.add('hidden');
-            document.getElementById('game-area').classList.remove('hidden');
-            document.getElementById('controls-info').classList.remove('hidden');
-
-            if(this.isHost) {
-                this.startGameLoop();
-            }
-        }
-
-        // --- INPUT MAPPING ---
-
-        // Standard Map
-        mapKey(key, player) {
-            // Player 1
-            if (player === 1) {
-                if (key === 'ArrowLeft') return jsnes.Controller.BUTTON_LEFT;
-                if (key === 'ArrowRight') return jsnes.Controller.BUTTON_RIGHT;
-                if (key === 'ArrowUp') return jsnes.Controller.BUTTON_UP;
-                if (key === 'ArrowDown') return jsnes.Controller.BUTTON_DOWN;
-                if (key === 'z') return jsnes.Controller.BUTTON_A;
-                if (key === 'x') return jsnes.Controller.BUTTON_B;
-                if (key === 'Enter') return jsnes.Controller.BUTTON_START;
-                if (key === 'Shift') return jsnes.Controller.BUTTON_SELECT;
-            }
-            // Player 2 (Local/Network)
-            if (player === 2) {
-                if (key === 'a') return jsnes.Controller.BUTTON_LEFT;
-                if (key === 'd') return jsnes.Controller.BUTTON_RIGHT;
-                if (key === 'w') return jsnes.Controller.BUTTON_UP;
-                if (key === 's') return jsnes.Controller.BUTTON_DOWN;
-                if (key === 'f') return jsnes.Controller.BUTTON_A;
-                if (key === 'g') return jsnes.Controller.BUTTON_B;
-                if (key === 'h') return jsnes.Controller.BUTTON_START;
-                if (key === 'j') return jsnes.Controller.BUTTON_SELECT;
-            }
-            return null;
-        }
-
-        initListeners() {
-            window.addEventListener('keydown', (e) => this.handleInput(e, true));
-            window.addEventListener('keyup', (e) => this.handleInput(e, false));
-        }
-
-        handleInput(e, isDown) {
-            if (this.screen !== 'room-screen' || !this.nes) return;
-
-            // Handle P1 Inputs (Always local)
-            const p1Btn = this.mapKey(e.key, 1);
-            if (p1Btn) {
-                if (isDown) this.nes.buttonDown(1, p1Btn);
-                else this.nes.buttonUp(1, p1Btn);
+                this.nes.loadROM(romArrayBuffer);
+                this.frameLoop();
             }
 
-            // Handle P2 Inputs
-            // If Host: We receive P2 inputs via network OR we allow local testing
-            // If Client: We send our P2 inputs to Host
-
-            const p2Btn = this.mapKey(e.key, 2);
-
-            if (p2Btn) {
-                if (this.isHost) {
-                    // Local P2 (Testing only)
-                    if (isDown) this.nes.buttonDown(2, p2Btn);
-                    else this.nes.buttonUp(2, p2Btn);
-                } else {
-                    // Client sends input to Host
-                    this.networkChannel.postMessage({
-                        type: 'P2_INPUT',
-                        key: e.key,
-                        isDown: isDown
-                    });
-                }
-            }
-        }
-
-        // --- NETWORK SYNC LOOP (HOST SIDE) ---
-
-        startGameLoop() {
-            if (this.frameId) cancelAnimationFrame(this.frameId);
-
-            const loop = () => {
+            frameLoop() {
                 if (!this.nes) return;
-
-                // Emulate Frame
                 this.nes.frame();
+                requestAnimationFrame(() => this.frameLoop());
+            }
 
-                // If Host, sync state to Client
-                if (this.isHost && this.p2Connected) {
-                    // We are not sending the whole canvas (too slow for BroadcastChannel).
-                    // In a real app, we'd use WebRTC DataChannel for video.
-                    // Here, we trust the Client also runs the emulator, but we need to sync RNG or inputs.
-                    // For this simple demo, we will capture the Frame as a Bitmap and send it.
-                    // Note: createImageBitmap is async, but fast enough for local tabs.
+            // --- NETWORK HANDLERS ---
 
-                    createImageBitmap(this.canvas).then(bitmap => {
-                        this.networkChannel.postMessage({
-                            type: 'FRAME_BUFFER',
-                            imageBitmap: bitmap
-                        }, [bitmap]); // Transferable
-                    });
+            handleNetworkMessage(data) {
+                if (this.isHost) {
+                    // HOST LOGIC
+                    if (data.type === 'JOIN_REQUEST' && data.code === this.roomCode) {
+                        this.p2Connected = true;
+                        this.showToast("PLAYER 2 CONNECTED");
+                        document.getElementById('p2-dot').classList.add('online');
+                        
+                        // Acknowledge
+                        this.network.postMessage({ type: 'JOIN_ACCEPT', code: this.roomCode });
+                        
+                        // If ROM already loaded, send it
+                        if (this.romData) {
+                            this.network.postMessage({ type: 'ROM_TRANSFER', rom: this.romData });
+                        }
+                    }
+                    else if (data.type === 'P2_INPUT') {
+                        // Handle P2 input from Client
+                        this.handleInput(data.key, data.isDown, 2);
+                    }
+
+                } else {
+                    // CLIENT LOGIC
+                    if (data.type === 'JOIN_ACCEPT') {
+                        this.showToast("CONNECTED TO HOST");
+                        document.getElementById('room-title').innerText = "WAITING FOR ROM...";
+                    }
+                    else if (data.type === 'ROM_TRANSFER') {
+                        this.showToast("ROM RECEIVED. STARTING.");
+                        this.startGame(data.rom);
+                    }
+                    else if (data.type === 'VIDEO_FRAME') {
+                        // Render frame sent by host onto our canvas (which updates the texture)
+                        const ctx = document.getElementById('nes-canvas').getContext('2d');
+                        ctx.drawImage(data.bmp, 0, 0);
+                        if (this.screenTexture) this.screenTexture.needsUpdate = true;
+                    }
+                }
+            }
+
+            // --- INPUT HANDLING ---
+
+            handleInput(key, isDown, player) {
+                if (!this.nes) return;
+                
+                // Mappings
+                let btn = null;
+                
+                if (player === 1) { // Arrows
+                    if (key === 'ArrowLeft') btn = jsnes.Controller.BUTTON_LEFT;
+                    if (key === 'ArrowRight') btn = jsnes.Controller.BUTTON_RIGHT;
+                    if (key === 'ArrowUp') btn = jsnes.Controller.BUTTON_UP;
+                    if (key === 'ArrowDown') btn = jsnes.Controller.BUTTON_DOWN;
+                    if (key === 'z') btn = jsnes.Controller.BUTTON_A;
+                    if (key === 'x') btn = jsnes.Controller.BUTTON_B;
+                    if (key === 'Enter') btn = jsnes.Controller.BUTTON_START;
+                    if (key === 'Shift') btn = jsnes.Controller.BUTTON_SELECT;
+                } 
+                else if (player === 2) { // WASD
+                    if (key === 'a') btn = jsnes.Controller.BUTTON_LEFT;
+                    if (key === 'd') btn = jsnes.Controller.BUTTON_RIGHT;
+                    if (key === 'w') btn = jsnes.Controller.BUTTON_UP;
+                    if (key === 's') btn = jsnes.Controller.BUTTON_DOWN;
+                    if (key === 'f') btn = jsnes.Controller.BUTTON_A;
+                    if (key === 'g') btn = jsnes.Controller.BUTTON_B;
+                    if (key === 'h') btn = jsnes.Controller.BUTTON_START;
+                    if (key === 'j') btn = jsnes.Controller.BUTTON_SELECT;
                 }
 
-                this.frameId = requestAnimationFrame(loop);
-            };
-
-            this.frameId = requestAnimationFrame(loop);
-        }
-
-        // --- CLIENT RENDERER ---
-
-        drawFrame(bitmap) {
-            this.ctx.drawImage(bitmap, 0, 0);
-        }
-
-        handleNetworkInput(p1State, p2State) {
-            // If we are client, we mostly just render the video.
-            // But for input responsiveness, if the client presses a button,
-            // the host receives it and injects it.
-        }
-    }
-
-    // --- NETWORK RECEIVER FOR HOST (P2 INPUTS) ---
-
-    // We need a global listener to catch P2 inputs if we are the host
-    const network = new BroadcastChannel(CHANNEL_NAME);
-    network.onmessage = (event) => {
-        if (app.isHost && event.data.type === 'P2_INPUT') {
-            const { key, isDown } = event.data;
-            const btn = app.mapKey(key, 2);
-            if (btn) {
-                if (isDown) app.nes.buttonDown(2, btn);
-                else app.nes.buttonUp(2, btn);
+                if (btn) {
+                    if (isDown) this.nes.buttonDown(player, btn);
+                    else this.nes.buttonUp(player, btn);
+                }
             }
         }
-    };
 
-    // Initialize App
-    const app = new JojoliApp();
+        // --- GLOBAL LISTENERS ---
+        const app = new JojoliApp();
 
-</script>
+        window.addEventListener('keydown', (e) => {
+            // If we are client, send P2 input to host
+            if (!app.isHost) {
+                const p2Btn = app.checkIfP2Key(e.key);
+                if (p2Btn) {
+                    app.network.postMessage({ type: 'P2_INPUT', key: e.key, isDown: true });
+                    return;
+                }
+            }
+            // If host (or client playing local logic), handle locally
+            app.handleInput(e.key, true, 1);
+            if (app.isHost) app.handleInput(e.key, true, 2); // Allow host to test P2
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (!app.isHost) {
+                const p2Btn = app.checkIfP2Key(e.key);
+                if (p2Btn) {
+                    app.network.postMessage({ type: 'P2_INPUT', key: e.key, isDown: false });
+                    return;
+                }
+            }
+            app.handleInput(e.key, false, 1);
+            if (app.isHost) app.handleInput(e.key, false, 2);
+        });
+
+        // Helper to check if a key belongs to Player 2 mapping
+        JojoliApp.prototype.checkIfP2Key = function(key) {
+            const p2Keys = ['w','a','s','d','f','g','h','j'];
+            return p2Keys.includes(key.toLowerCase());
+        };
+
+    </script>
 </body>
 </html>
