@@ -3,20 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>JOJOLI 3D - LOCAL & NET</title>
-    <!-- Check if libraries loaded -->
-    <script>
-        if(typeof THREE === 'undefined') alert("ERROR: 3D Library failed to load. Check internet connection.");
-    </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <title>JOJOLI - HYBRID MODE</title>
+    <!-- Switched to unpkg which is often more reliable -->
+    <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
     <script src="https://unpkg.com/jsnes/dist/jsnes.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 
     <style>
         :root {
             --neon-blue: #00f3ff;
             --neon-pink: #ff00ff;
-            --neon-green: #00ff00;
             --bg: #050505;
             --glass: rgba(0, 0, 0, 0.95);
         }
@@ -27,10 +23,35 @@
             margin: 0; overflow: hidden; background: var(--bg);
             font-family: 'Share Tech Mono', monospace; color: white;
             height: 100vh; width: 100vw;
+            display: flex; justify-content: center; align-items: center;
         }
 
-        #world { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
+        /* 3D Container */
+        #world {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1;
+        }
+
+        /* 2D Container (Fallback) */
+        #screen-container {
+            display: none; /* Hidden by default, shown if 3D fails */
+            z-index: 5;
+            position: relative;
+            border: 4px solid #333;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            background: #000;
+        }
+
+        canvas#nes-canvas {
+            display: block; /* Normally hidden for 3D, block for 2D */
+            width: 100%;
+            height: 100%;
+            image-rendering: pixelated; /* Sharp pixels */
+        }
+
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none;
+        }
         .interactive { pointer-events: auto; }
 
         /* PANELS */
@@ -44,8 +65,7 @@
         }
         .hidden { display: none !important; }
         
-        h1 { font-family: 'Orbitron'; color: var(--neon-blue); margin: 0; text-transform: uppercase; }
-        .origin-tag { font-size: 0.6rem; color: #666; word-break: break-all; }
+        h1 { font-family: 'Orbitron'; color: var(--neon-blue); margin: 0; text-transform: uppercase; font-size: 2rem; }
         
         .mode-btn {
             background: #111; border: 1px solid var(--neon-blue); color: white;
@@ -67,13 +87,13 @@
             position: absolute; top: 0; left: 0; right: 0;
             background: rgba(0,0,0,0.8); border-bottom: 1px solid #333;
             display: flex; justify-content: space-between; padding: 10px 20px;
-            font-family: 'Orbitron'; font-size: 0.9rem;
+            font-family: 'Orbitron'; font-size: 0.9rem; z-index: 20;
         }
 
         /* CONTROLS */
         #controls-layer {
             position: absolute; bottom: 20px; width: 100%;
-            display: flex; justify-content: space-between; padding: 0 40px; pointer-events: none;
+            display: flex; justify-content: space-between; padding: 0 40px; pointer-events: none; z-index: 20;
         }
         @media (min-width: 1024px) { #controls-layer { display: none; } }
 
@@ -107,28 +127,39 @@
         }
         .m-btn.start { border-color: #0f0; color: #0f0; }
 
-        #nes-canvas { display: none; }
         .pc-hint {
-            position: absolute; bottom: 110px; width:100%; text-align:center; color:#666; font-size:0.8rem;
+            position: absolute; bottom: 110px; width:100%; text-align:center; color:#666; font-size:0.8rem; z-index: 20;
+        }
+
+        /* 2D Mode Specifics */
+        body.mode-2d { background: #111; }
+        body.mode-2d #world { display: none; }
+        body.mode-2d #screen-container { 
+            display: flex; 
+            width: 90vw; height: 67.5vw; /* 4:3 Aspect Ratio */
+            max-width: 800px; max-height: 600px;
         }
     </style>
 </head>
 <body>
 
+    <!-- 3D World (Hidden if library fails) -->
     <div id="world"></div>
-    <canvas id="nes-canvas" width="256" height="240"></canvas>
 
+    <!-- 2D Screen (Shown if library fails) -->
+    <div id="screen-container">
+        <canvas id="nes-canvas" width="256" height="240"></canvas>
+    </div>
+
+    <!-- UI -->
     <div id="ui-layer">
         <!-- Intro -->
         <div id="intro" class="panel interactive">
-            <h1>Jojoli 3D</h1>
-            <div class="origin-tag" id="origin-disp">Loading Origin...</div>
+            <h1>Jojoli</h1>
+            <div id="mode-status" style="color:#aaa; margin-bottom:10px;">Detecting Graphics...</div>
             <hr style="border-color:#333">
             <button class="mode-btn" onclick="app.localMode()">LOCAL 2 PLAYER (Same PC)</button>
-            <div style="font-size:0.7rem; color:#888;">Recommended: Works 100%</div>
-            
             <button class="mode-btn" style="border-color:#555" onclick="app.netMode()">NETWORK ROOM (Share Code)</button>
-            <div style="font-size:0.7rem; color:#888;">Advanced: Requires SAME Browser</div>
         </div>
 
         <!-- Network Menu -->
@@ -137,9 +168,6 @@
             <button class="mode-btn" onclick="app.createRoom()">CREATE ROOM</button>
             <input type="text" id="join-code" placeholder="CODE">
             <button class="mode-btn" style="border-color:#555" onclick="app.joinRoom()">JOIN ROOM</button>
-            <div style="color:orange; font-size:0.7rem; background:rgba(255,165,0,0.1); padding:5px;">
-                ⚠️ Must be SAME Browser (Chrome+Chrome). No Incognito.
-            </div>
         </div>
 
         <!-- Room/Loading -->
@@ -168,7 +196,6 @@
             </div>
 
             <div id="controls-layer">
-                <!-- Left -->
                 <div class="c-zone">
                     <div class="d-pad">
                         <div class="d-btn d-up" onmousedown="app.btn(1, 5, true)" onmouseup="app.btn(1, 5, false)" ontouchstart="app.btn(1, 5, true)" ontouchend="app.btn(1, 5, false)">▲</div>
@@ -182,7 +209,6 @@
                     </div>
                 </div>
 
-                <!-- Right -->
                 <div class="c-zone">
                     <div class="ab-btns">
                         <div class="ab-btn" style="background:#d32f2f" onmousedown="app.btn(1, 2, true)" onmouseup="app.btn(1, 2, false)" ontouchstart="app.btn(1, 2, true)" ontouchend="app.btn(1, 2, false)">B</div>
@@ -202,58 +228,86 @@
 
         class Jojoli {
             constructor() {
-                this.mode = 'LOCAL'; // LOCAL or NET
+                // 1. DETECT GRAPHICS CAPABILITY
+                this.is3D = (typeof THREE !== 'undefined');
+                
+                const statusEl = document.getElementById('mode-status');
+                if(this.is3D) {
+                    statusEl.innerText = "3D MODE DETECTED";
+                    statusEl.style.color = "#00f3ff";
+                } else {
+                    statusEl.innerText = "2D MODE (3D Library Unavailable)";
+                    statusEl.style.color = "#ff00ff";
+                    document.body.classList.add('mode-2d');
+                }
+
+                this.mode = 'LOCAL'; 
                 this.isHost = false;
                 this.nes = null;
                 this.romData = null;
                 this.p2 = false;
                 this.code = null;
                 
-                // Setup LocalStorage Fallback
-                this.bc = new BroadcastChannel('jojoli_v4');
+                // Networking Setup
+                this.bc = new BroadcastChannel('jojoli_v5');
                 this.bc.onmessage = e => this.onMsg(e.data);
 
                 window.addEventListener('storage', (e) => {
-                    if(e.key === 'jojoli_v4' && e.newValue) {
+                    if(e.key === 'jojoli_v5' && e.newValue) {
                         this.onMsg(JSON.parse(e.newValue));
-                        localStorage.removeItem('jojoli_v4');
+                        localStorage.removeItem('jojoli_v5');
                     }
                 });
 
-                // Show Origin for debugging
-                document.getElementById('origin-disp').innerText = window.location.origin + window.location.pathname;
-
-                // 3D Setup
-                this.sc = new THREE.Scene();
-                this.cam = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 100);
-                this.cam.position.z = 3.5;
-                this.ren = new THREE.WebGLRenderer({ alpha: true });
-                this.ren.setSize(window.innerWidth, window.innerHeight);
-                document.getElementById('world').appendChild(this.ren.domElement);
+                // Init Graphics
+                this.initGraphics();
                 
-                const cvs = document.getElementById('nes-canvas');
-                this.tex = new THREE.CanvasTexture(cvs);
-                this.tex.minFilter = THREE.NearestFilter;
-                this.sc.add(new THREE.Mesh(new THREE.PlaneGeometry(3.5, 2.6), new THREE.MeshBasicMaterial({ map: this.tex })));
-                this.sc.add(new THREE.AmbientLight(1));
-                
-                this.loop3D();
-                
+                // Inputs
                 window.addEventListener('keydown', e => this.key(e.key, true));
                 window.addEventListener('keyup', e => this.key(e.key, false));
+            }
+
+            initGraphics() {
+                const cvs = document.getElementById('nes-canvas');
+                
+                if(this.is3D) {
+                    // 3D Setup
+                    this.sc = new THREE.Scene();
+                    this.cam = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 100);
+                    this.cam.position.z = 3.5;
+                    this.ren = new THREE.WebGLRenderer({ alpha: true });
+                    this.ren.setSize(window.innerWidth, window.innerHeight);
+                    document.getElementById('world').appendChild(this.ren.domElement);
+                    
+                    this.tex = new THREE.CanvasTexture(cvs);
+                    this.tex.minFilter = THREE.NearestFilter;
+                    this.sc.add(new THREE.Mesh(new THREE.PlaneGeometry(3.5, 2.6), new THREE.MeshBasicMaterial({ map: this.tex })));
+                    this.sc.add(new THREE.AmbientLight(1));
+                    this.loop3D();
+                } else {
+                    // 2D Setup is handled by CSS
+                    // We just need to ensure we have a 2D context for the NES
+                    this.ctx2d = cvs.getContext('2d');
+                }
+            }
+
+            loop3D() {
+                if(!this.is3D) return;
+                requestAnimationFrame(() => this.loop3D());
+                this.ren.render(this.sc, this.cam);
             }
 
             send(d) {
                 if(this.mode === 'NET') {
                     const s = JSON.stringify(d);
                     try { this.bc.postMessage(d); } catch(e){}
-                    try { localStorage.setItem('jojoli_v4', s); } catch(e){}
+                    try { localStorage.setItem('jojoli_v5', s); } catch(e){}
                 }
             }
 
             localMode() {
                 this.mode = 'LOCAL';
-                this.isHost = true; // Local acts as host (runs game)
+                this.isHost = true;
                 document.getElementById('intro').classList.add('hidden');
                 this.showRoom("LOCAL MODE");
                 document.getElementById('host-area').classList.remove('hidden');
@@ -286,10 +340,7 @@
                 this.send({ t: 'J', c: c });
                 
                 setTimeout(() => {
-                    if(!this.p2 && !this.isHost) {
-                        alert("TIMEOUT: \n1. Ensure both tabs are Chrome.\n2. Ensure NO Incognito.\n3. Try LOCAL MODE instead.");
-                        location.reload();
-                    }
+                    if(!this.p2 && !this.isHost) alert("TIMEOUT. Try LOCAL MODE.");
                 }, 5000);
             }
 
@@ -316,7 +367,8 @@
                 document.getElementById('game-ui').style.display = 'block';
 
                 const cvs = document.getElementById('nes-canvas');
-                const ctx = cvs.getContext('2d');
+                // Ensure context exists for 2D mode
+                const ctx = cvs.getContext('2d'); 
                 const img = ctx.createImageData(256,240);
 
                 this.nes = new jsnes.NES({
@@ -327,11 +379,15 @@
                             d[i*4]=c&0xFF; d[i*4+1]=(c>>8)&0xFF; d[i*4+2]=(c>>16)&0xFF; d[i*4+3]=0xFF;
                         }
                         ctx.putImageData(img,0,0);
-                        this.tex.needsUpdate = true;
-
-                        // Stream if Network Mode and P2 connected
-                        if(this.mode === 'NET' && this.isHost && this.p2) {
-                            createImageBitmap(cvs).then(b => this.send({ t: 'V', b: b }));
+                        
+                        // Update 3D Texture if available
+                        if(this.is3D && this.tex) {
+                            this.tex.needsUpdate = true;
+                            
+                            // Stream to P2
+                            if(this.mode === 'NET' && this.isHost && this.p2) {
+                                createImageBitmap(cvs).then(b => this.send({ t: 'V', b: b }));
+                            }
                         }
                     },
                     onAudioSample: ()=>{}
@@ -349,23 +405,13 @@
                 }
             }
 
-            loop3D() {
-                requestAnimationFrame(()=>this.loop3D());
-                this.ren.render(this.sc, this.cam);
-            }
-
             btn(p, b, d) {
-                // Local: Just inject
-                // Net Client: Send
-                // Net Host: Inject P2 input received
-                
                 if(this.mode === 'LOCAL' || this.isHost) {
                     if(this.nes) {
                         if(d) this.nes.buttonDown(p, b);
                         else this.nes.buttonUp(p, b);
                     }
                 }
-
                 if(this.mode === 'NET' && !this.isHost && p===2) {
                     this.send({ t:'I', b:b, d:d });
                 }
@@ -374,14 +420,11 @@
             key(k, d) {
                 let b=null, pl=1;
                 k=k.toLowerCase();
-                
-                // Map P1
                 if(k==='arrowleft') b=C.L; if(k==='arrowright') b=C.R;
                 if(k==='arrowup') b=C.U; if(k==='arrowdown') b=C.D;
                 if(k==='z') b=C.A; if(k==='x') b=C.B;
                 if(k==='enter') b=C.ST; if(k==='shift') b=C.SEL;
                 
-                // Map P2
                 if(!b && (this.mode === 'LOCAL' || this.isHost)) {
                     pl=2;
                     if(k==='a') b=C.L; if(k==='d') b=C.R;
@@ -389,7 +432,6 @@
                     if(k==='f') b=C.A; if(k==='g') b=C.B;
                     if(k==='h') b=C.ST; if(k==='j') b=C.SEL;
                 }
-                
                 if(b) this.btn(pl, b, d);
             }
 
@@ -414,7 +456,7 @@
                     if(d.t==='V') {
                         const c = document.getElementById('nes-canvas').getContext('2d');
                         c.drawImage(d.b,0,0);
-                        this.tex.needsUpdate = true;
+                        if(this.is3D && this.tex) this.tex.needsUpdate = true;
                     }
                 }
             }
