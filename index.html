@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jojoli Online - Host Diagnostics</title>
+    <title>Jojoli Online - Final</title>
     
     <script src="https://cdn.jsdelivr.net/npm/peerjs@1.3.2/dist/peerjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
@@ -14,10 +14,11 @@
     <style>
         :root {
             --neon-blue: #00f3ff;
+            --neon-pink: #ff00ff;
             --bg: #050505;
-            --glass: rgba(20, 20, 20, 0.98);
+            --glass: rgba(0, 0, 0, 0.95);
             --green: #00ff00;
-            --orange: #ffaa00;
+            --red: #ff3333;
         }
 
         * { box-sizing: border-box; touch-action: none; user-select: none; }
@@ -29,11 +30,15 @@
             display: flex; justify-content: center; align-items: center;
         }
 
+        /* 3D World */
         #world { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+        
+        /* Hidden Logic Elements */
         #screen-container { display: none; }
         canvas#nes-canvas { display: block; width: 256px; height: 240px; }
         video#remote-video { display: none; }
 
+        /* UI Layer */
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
         .interactive { pointer-events: auto; }
 
@@ -41,42 +46,56 @@
             background: var(--glass); border: 2px solid var(--neon-blue);
             padding: 25px; text-align: center;
             max-width: 90%; width: 450px;
-            box-shadow: 0 0 30px rgba(0, 243, 255, 0.15);
+            box-shadow: 0 0 30px rgba(0, 243, 255, 0.2);
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            display: flex; flex-direction: column; gap: 12px;
+            display: flex; flex-direction: column; gap: 15px;
         }
         .hidden { display: none !important; }
         
-        h1 { font-family: 'Orbitron'; color: var(--neon-blue); margin: 0; text-transform: uppercase; font-size: 1.4rem; }
+        h1 { font-family: 'Orbitron'; color: var(--neon-blue); margin: 0; text-transform: uppercase; font-size: 1.5rem; }
         
         .mode-btn {
             background: #000; border: 1px solid var(--neon-blue); color: var(--neon-blue);
-            padding: 12px; font-family: 'Orbitron'; font-size: 1rem; cursor: pointer;
-            transition: 0.2s; text-transform: uppercase;
+            padding: 15px; font-family: 'Orbitron'; font-size: 1rem; cursor: pointer;
+            font-weight: bold; transition: 0.2s; text-transform: uppercase;
         }
-        .mode-btn:hover { background: var(--neon-blue); color: black; }
-        .mode-btn:disabled { border-color: #333; color: #333; cursor: wait; }
+        .mode-btn:hover { background: var(--neon-blue); color: black; box-shadow: 0 0 15px var(--neon-blue); }
+        .mode-btn:disabled { border-color: #333; color: #333; cursor: not-allowed; }
+        .mode-btn.upload {
+            background: var(--green); color: black; border-color: var(--green);
+            font-size: 1.2rem;
+        }
         
         input {
             width: 100%; padding: 12px; background: #000; border: 1px solid #444;
             color: white; font-family: monospace; text-align: center; font-size: 1.1rem; letter-spacing: 2px;
         }
 
+        /* Status Indicators */
         .status-box {
-            background: #111; padding: 10px; border: 1px solid #333; font-size: 0.8rem;
+            background: #111; padding: 10px; border: 1px solid #333; font-size: 0.9rem;
             min-height: 40px; display: flex; justify-content: center; align-items: center;
+            font-weight: bold;
         }
-        
-        .log-text { font-size: 0.8rem; min-height: 1.2em; color: #aaa; margin-top: 5px; }
-        .host-log { color: var(--orange); font-size: 0.9rem; min-height: 1.2em; }
 
+        .log-text { font-size: 0.8rem; min-height: 1.2em; color: #aaa; margin-top: 5px; }
+
+        /* Game UI */
         #game-ui { display: none; width: 100%; height: 100%; position: relative; }
+        
+        /* Waiting Overlay for P2 */
+        #wait-overlay {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            text-align: center; color: var(--neon-blue); font-family: 'Orbitron';
+            background: rgba(0,0,0,0.8); padding: 20px; border: 1px solid var(--neon-blue);
+            z-index: 50;
+        }
         
         .status-bar {
             position: absolute; top: 0; left: 0; right: 0;
             background: rgba(0,0,0,0.9); border-bottom: 1px solid #333;
             display: flex; justify-content: space-between; padding: 8px 15px;
-            font-family: 'Orbitron'; font-size: 0.8rem; z-index: 20;
+            font-family: 'Orbitron'; font-size: 0.8rem; z-index: 20; pointer-events: auto;
         }
 
         #controls-layer {
@@ -96,7 +115,7 @@
         .ab-btns { display: flex; gap: 15px; }
         .ab-btn {
             width: 60px; height: 60px; border-radius: 50%;
-            background: #d32f2f; border: 2px solid white;
+            background: var(--neon-pink); border: 2px solid white;
             display: flex; justify-content: center; align-items: center;
             font-weight: bold; font-size: 1.2rem;
         }
@@ -110,52 +129,61 @@
     <video id="remote-video" autoplay playsinline muted></video>
 
     <div id="ui-layer">
-        <!-- Intro -->
+        <!-- Intro Panel -->
         <div id="intro" class="panel interactive">
             <h1>JOJOLI LINK</h1>
             
-            <div class="status-box" id="intro-status">Initializing...</div>
+            <div class="status-box" id="intro-status">Connecting to Server...</div>
             
             <hr style="border-color:#222; width:100%">
             
-            <button class="mode-btn" id="btn-create" onclick="app.createRoom()" disabled>HOST GAME</button>
-            <button class="mode-btn" id="btn-join" onclick="app.showJoin()" disabled>JOIN GAME</button>
+            <button class="mode-btn" id="btn-create" onclick="app.createRoom()" disabled>HOST GAME (P1)</button>
+            <button class="mode-btn" id="btn-join" onclick="app.showJoin()" disabled>JOIN GAME (P2)</button>
             
             <div id="intro-log" class="log-text"></div>
         </div>
 
-        <!-- Host -->
+        <!-- Host Panel -->
         <div id="create-panel" class="panel interactive hidden">
-            <h1>HOST MODE</h1>
-            <p style="font-size:0.8rem; color:#888">Send this code to P2:</p>
+            <h1>HOST ROOM</h1>
+            <p style="font-size:0.8rem; color:#888">Send this code to your friend:</p>
             <input type="text" id="my-id" readonly onclick="this.select()">
             
-            <!-- Host Diagnostic Log -->
-            <div id="host-diag" class="status-box" style="border-color:var(--neon-blue); color:var(--neon-blue)">
+            <!-- Host Status -->
+            <div id="host-diag" class="status-box" style="border-color:#555; color:#aaa">
                 Waiting for Player 2...
             </div>
             
-            <div id="host-controls" class="hidden">
-                <div style="color:var(--green); margin-bottom:10px;">CONNECTED</div>
-                <p>Load ROM (.nes):</p>
+            <!-- Upload Button (Hidden until connected) -->
+            <div id="host-controls" class="hidden" style="margin-top: 20px;">
+                <div style="color:var(--green); font-weight:bold; margin-bottom:10px;">PLAYER 2 JOINED!</div>
+                <p>Select a .NES ROM file to start:</p>
                 <input type="file" id="rom-file" accept=".nes" style="display:none" onchange="app.fileSelected(this)">
-                <button class="mode-btn" onclick="document.getElementById('rom-file').click()">SELECT FILE</button>
+                <button class="mode-btn upload" onclick="document.getElementById('rom-file').click()">
+                    📂 SELECT ROM FILE
+                </button>
             </div>
         </div>
 
-        <!-- Join -->
+        <!-- Join Panel -->
         <div id="join-panel" class="panel interactive hidden">
-            <h1>CLIENT MODE</h1>
+            <h1>JOIN GAME</h1>
             <p style="font-size:0.8rem; color:#888">Paste Host Code:</p>
-            <input type="text" id="host-id" placeholder="XXXX-XXXX-XXXX" autocomplete="off">
+            <input type="text" id="host-id" placeholder="PASTE CODE HERE" autocomplete="off">
             
             <button class="mode-btn" onclick="app.connectToHost()" id="btn-connect">CONNECT</button>
             
             <div id="join-log" class="log-text">Waiting...</div>
         </div>
 
-        <!-- Game -->
+        <!-- Game UI -->
         <div id="game-ui">
+            <!-- Overlay for P2 -->
+            <div id="wait-overlay">
+                <div style="font-size:2rem; margin-bottom:10px;">⏳</div>
+                WAITING FOR HOST<br>TO LOAD ROM...
+            </div>
+
             <div class="status-bar">
                 <span>P1 (HOST)</span>
                 <span style="color:#00f3ff">LINK ACTIVE</span>
@@ -173,7 +201,7 @@
                 <div class="c-zone">
                     <div class="ab-btns">
                         <div class="ab-btn" data-key="x">B</div>
-                        <div class="ab-btn" style="background:var(--neon-blue); color:black" data-key="z">A</div>
+                        <div class="ab-btn" data-key="z">A</div>
                     </div>
                 </div>
             </div>
@@ -192,7 +220,6 @@
                 this.nes = null;
                 this.conn = null;
                 this.call = null;
-                this.romData = null;
                 this.is3D = false;
 
                 if(typeof Peer === 'undefined') {
@@ -231,6 +258,7 @@
 
             loop3D() {
                 requestAnimationFrame(() => this.loop3D());
+                // Client: Draw Video -> Canvas -> Texture
                 if(!this.isHost) {
                     const vid = document.getElementById('remote-video');
                     if(vid.readyState === 4) {
@@ -239,6 +267,7 @@
                         if(this.tex) this.tex.needsUpdate = true;
                     }
                 } else {
+                    // Host: Draw NES -> Canvas -> Texture
                     if(this.tex) this.tex.needsUpdate = true;
                 }
                 if(this.ren) this.ren.render(this.sc, this.cam);
@@ -264,31 +293,19 @@
 
                 this.peer.on('open', (id) => {
                     this.log("Ready", "intro-status");
-                    this.log("Ready", "intro-log");
                     document.getElementById('btn-create').disabled = false;
                     document.getElementById('btn-join').disabled = false;
                 });
 
                 this.peer.on('connection', (conn) => {
-                    // HOST DIAGNOSTIC: Connection Request Received
-                    console.log("Host: Received connection request");
                     if(this.isHost) {
                         const diag = document.getElementById('host-diag');
-                        diag.innerText = "Player 2 is connecting...";
-                        diag.style.color = "var(--orange)";
-                        diag.style.borderColor = "var(--orange)";
+                        diag.innerText = "CONNECTED!";
+                        diag.style.color = "var(--green)";
+                        diag.style.borderColor = "var(--green)";
                         
-                        // Add listener to see if it opens
-                        conn.on('open', () => {
-                            diag.innerText = "CONNECTED!";
-                            diag.style.color = "var(--green)";
-                            diag.style.borderColor = "var(--green)";
-                        });
-                        
-                        conn.on('close', () => {
-                            diag.innerText = "Disconnected";
-                            diag.style.color = "var(--red)";
-                        });
+                        // Show Upload Button
+                        document.getElementById('host-controls').classList.remove('hidden');
                     }
                     this.setupConnection(conn);
                 });
@@ -299,6 +316,9 @@
                         const vid = document.getElementById('remote-video');
                         vid.srcObject = s;
                         vid.play();
+                        
+                        // Hide "Waiting" overlay on P2
+                        document.getElementById('wait-overlay').style.display = 'none';
                     });
                     this.call = call;
                 });
@@ -310,11 +330,8 @@
                         btn.disabled = false;
                         btn.innerText = "RETRY";
                     }
-                    if(err.type === 'peer-unavailable') {
-                        this.log("Host ID not found.", "join-log");
-                    } else if (err.type === 'network' || err.type === 'disconnected') {
-                        this.log("Network Blocked.", "join-log");
-                    }
+                    if(err.type === 'peer-unavailable') this.log("Host ID not found.", "join-log");
+                    else if (err.type === 'network') this.log("Network Blocked.", "join-log");
                 });
             }
 
@@ -337,11 +354,7 @@
                 btn.innerText = "CONNECTING...";
                 this.log("Negotiating...", "join-log");
                 
-                const conn = this.peer.connect(id, { 
-                    reliable: true,
-                    serialization: 'json' // Back to JSON for stability
-                });
-                
+                const conn = this.peer.connect(id, { reliable: true });
                 this.setupConnection(conn);
             }
 
@@ -350,19 +363,19 @@
                 
                 const timeout = setTimeout(() => {
                     if(!this.conn.open) {
-                        alert("CONNECTION FAILED.\n\nHost did not acknowledge.\n\nSolution: Host should refresh and try again.");
+                        alert("Connection Failed. Host might be offline.");
                         const btn = document.getElementById('btn-connect');
                         if(btn) {
                             btn.disabled = false;
                             btn.innerText = "RETRY";
                         }
-                        this.log("Host Failed to Respond", "join-log");
+                        this.log("Timed Out", "join-log");
                     }
-                }, 60000);
+                }, 30000);
 
                 conn.on('open', () => {
                     clearTimeout(timeout);
-                    console.log("Connection Opened");
+                    console.log("Data Connection Open");
                     this.log("Connected!", "join-log");
                     if(!this.isHost) {
                         this.switchPanel('game-ui');
@@ -370,10 +383,9 @@
                 });
 
                 conn.on('data', (d) => {
+                    // Host Receives P2 Inputs
                     if(this.isHost && d.t === 'I' && this.nes) {
                         d.d ? this.nes.buttonDown(2, d.b) : this.nes.buttonUp(2, d.b);
-                    } else if(!this.isHost && d.t === 'R') {
-                        this.loadRom(d.d);
                     }
                 });
 
@@ -389,27 +401,14 @@
                 const r = new FileReader();
                 r.onload = e => {
                     const buf = e.target.result;
-                    let bin = "";
                     const u8 = new Uint8Array(buf);
-                    for(let i=0;i<u8.length;i++) bin += String.fromCharCode(u8[i]);
-                    const b64 = btoa(bin);
-                    this.romData = b64;
-                    this.loadRom(b64);
-                    this.conn.send({ t:'R', d:b64 });
+                    this.startGame(u8);
                 };
                 r.readAsArrayBuffer(f);
             }
 
-            loadRom(b64) {
-                try {
-                    const bin = atob(b64);
-                    const u8 = new Uint8Array(bin.length);
-                    for(let i=0;i<bin.length;i++) u8[i] = bin.charCodeAt(i);
-                    this.startGame(u8);
-                } catch(e) { alert("ROM Error"); }
-            }
-
-            startGame(rom) {
+            startGame(romUint8Array) {
+                // Hide all panels, show Game UI
                 document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
                 document.getElementById('game-ui').style.display = 'block';
 
@@ -418,25 +417,32 @@
                 const img = ctx.createImageData(256,240);
 
                 this.nes = new jsnes.NES({
-                    onFrame: buf => {
+                    onFrame: (buffer) => {
                         const d = img.data;
-                        for(let i=0;i<buf.length;i++) {
-                            const c = buf[i];
+                        for(let i=0; i<buffer.length; i++) {
+                            const c = buffer[i];
                             d[i*4]=c&0xFF; d[i*4+1]=(c>>8)&0xFF; d[i*4+2]=(c>>16)&0xFF; d[i*4+3]=255;
                         }
-                        ctx.putImageData(img,0,0);
+                        ctx.putImageData(img, 0, 0);
+                        
+                        // Start Video Stream (Host Only) - ONCE
                         if(this.isHost && this.conn && this.conn.open && !this.call) {
-                            this.call = this.peer.call(this.conn.peer, cvs.captureStream(30));
+                            const stream = cvs.captureStream(30); // 30 FPS
+                            this.call = this.peer.call(this.conn.peer, stream);
                         }
                     },
                     onAudioSample: ()=>{}
                 });
-                this.nes.loadROM(rom);
+
+                this.nes.loadROM(romUint8Array);
                 this.loop();
             }
 
             loop() {
-                if(this.nes) { this.nes.frame(); requestAnimationFrame(()=>this.loop()); }
+                if(this.nes) {
+                    this.nes.frame();
+                    requestAnimationFrame(()=>this.loop());
+                }
             }
 
             bindInputs() {
@@ -454,13 +460,31 @@
             key(k, d) {
                 let btn=null, pl=1;
                 k=k.toLowerCase();
+                
+                // P1 Controls
                 if(k==='arrowup') btn=C.U; if(k==='arrowdown') btn=C.D;
                 if(k==='arrowleft') btn=C.L; if(k==='arrowright') btn=C.R;
                 if(k==='z') btn=C.A; if(k==='x') btn=C.B;
-                if(!btn) { pl=2; if(k==='w') btn=C.U; if(k==='s') btn=C.D; if(k==='a') btn=C.L; if(k==='d') btn=C.R; if(k==='f') btn=C.A; if(k==='g') btn=C.B; }
+                
+                // P2 Controls
+                if(!btn) {
+                    pl=2;
+                    if(k==='w') btn=C.U; if(k==='s') btn=C.D;
+                    if(k==='a') btn=C.L; if(k==='d') btn=C.R;
+                    if(k==='f') btn=C.A; if(k==='g') btn=C.B;
+                }
+                
                 if(btn) {
-                    if(this.nes) d?this.nes.buttonDown(pl,btn):this.nes.buttonUp(pl,btn);
-                    if(!this.isHost && pl===2) this.conn.send({ t:'I', b:btn, d:d });
+                    // Local Injection
+                    if(this.nes) {
+                        if(d) this.nes.buttonDown(pl, btn);
+                        else this.nes.buttonUp(pl, btn);
+                    }
+                    
+                    // Network Send (Only P2 inputs to Host)
+                    if(!this.isHost && pl === 2) {
+                        this.conn.send({ t: 'I', b: btn, d: d });
+                    }
                 }
             }
 
