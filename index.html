@@ -3,13 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>JOJOLI 3D - ONLINE MULTIPLAYER</title>
-    <!-- PeerJS for WebRTC (Cross-Device Connection) -->
+    <title>Jojoli Online - PeerJS</title>
+    
+    <!-- 1. PEERJS LIBRARY (Required for Cross-Device Play) -->
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
-    <!-- Three.js (3D Graphics) -->
+    
+    <!-- 2. Other Libraries -->
     <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
-    <!-- JSNES (Emulator) -->
     <script src="https://unpkg.com/jsnes/dist/jsnes.min.js"></script>
+    
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 
     <style>
@@ -31,6 +33,7 @@
 
         /* 3D World */
         #world { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        
         /* 2D Fallback */
         #screen-container { display: none; z-index: 5; position: relative; border: 4px solid #333; background: #000; }
         canvas#nes-canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
@@ -54,9 +57,10 @@
         .mode-btn {
             background: var(--neon-blue); color: black; border: none;
             padding: 15px; font-family: 'Orbitron'; font-size: 1.1rem; cursor: pointer;
-            font-weight: bold;
+            font-weight: bold; transition: 0.2s;
         }
-        .mode-btn:disabled { background: #555; cursor: not-allowed; }
+        .mode-btn:hover { transform: scale(1.05); }
+        .mode-btn:disabled { background: #555; cursor: wait; }
         
         input {
             width: 100%; padding: 10px; background: #000; border: 1px solid #555;
@@ -108,9 +112,9 @@
         <!-- Intro -->
         <div id="intro" class="panel interactive">
             <h1>Jojoli Online</h1>
-            <div style="color:yellow; font-size:0.8rem;">⚠️ INTERNET REQUIRED (PeerJS)</div>
+            <div id="peer-status" style="color:#aaa; font-size:0.8rem;">Connecting to PeerJS Server...</div>
             <hr style="border-color:#333">
-            <button class="mode-btn" id="btn-create" onclick="app.createRoom()" disabled>INITIALIZING...</button>
+            <button class="mode-btn" id="btn-create" onclick="app.createRoom()" disabled>CREATE ROOM</button>
             <button class="mode-btn" id="btn-join" onclick="app.showJoin()" disabled>JOIN ROOM</button>
         </div>
 
@@ -118,7 +122,7 @@
         <div id="create-panel" class="panel interactive hidden">
             <h1>Room Created</h1>
             <p>Send this ID to your friend:</p>
-            <input type="text" id="my-id" readonly onclick="this.select()" style="font-size:1.2rem; cursor:pointer;">
+            <input type="text" id="my-id" readonly onclick="this.select()" style="font-size:1rem; cursor:pointer; color:var(--neon-blue);">
             <div id="conn-status" style="color:#aaa;">Waiting for connection...</div>
             <div id="host-controls" class="hidden">
                 <hr style="border-color:#333">
@@ -174,14 +178,20 @@
                 this.conn = null;
                 this.romData = null;
 
-                // 1. Check 3D Lib
-                this.is3D = (typeof THREE !== 'undefined');
-                if(!this.is3D) document.body.classList.add('mode-2d');
+                // 1. CHECK PEERJS
+                if(typeof Peer === 'undefined') {
+                    alert("CRITICAL ERROR: PeerJS library failed to load.\nPlease check your Internet Connection and refresh.");
+                    document.getElementById('peer-status').innerText = "ERROR: PEERJS MISSING";
+                    document.getElementById('peer-status').style.color = "red";
+                    return;
+                }
 
                 // 2. Init Graphics
+                this.is3D = (typeof THREE !== 'undefined');
+                if(!this.is3D) document.body.classList.add('mode-2d');
                 this.initGraphics();
 
-                // 3. Init PeerJS (Online Networking)
+                // 3. Init PeerJS (Network)
                 this.initPeerJS();
 
                 // 4. Inputs
@@ -212,20 +222,18 @@
             }
 
             initPeerJS() {
-                if(typeof Peer === 'undefined') {
-                    alert("ERROR: PeerJS library failed to load. Check Internet.");
-                    return;
-                }
-
-                // Create Peer
+                document.getElementById('peer-status').innerText = "Connecting to Server...";
+                
+                // Initialize Peer
                 this.peer = new Peer(null, {
-                    debug: 1
+                    debug: 1 // Enable console logs for debugging
                 });
 
                 this.peer.on('open', (id) => {
-                    console.log('My ID: ' + id);
-                    document.getElementById('btn-create').innerText = "CREATE ROOM";
-                    document.getElementById('btn-join').innerText = "JOIN ROOM";
+                    console.log('My Peer ID: ' + id);
+                    document.getElementById('peer-status').innerText = "Ready to Play";
+                    document.getElementById('peer-status').style.color = "#0f0";
+                    
                     document.getElementById('btn-create').disabled = false;
                     document.getElementById('btn-join').disabled = false;
                 });
@@ -236,7 +244,8 @@
 
                 this.peer.on('error', (err) => {
                     console.error(err);
-                    alert("Connection Error: " + err.type);
+                    alert("Connection Error: " + err.type + "\nEnsure you have internet access.");
+                    document.getElementById('peer-status').innerText = "Connection Error";
                 });
             }
 
@@ -264,7 +273,7 @@
                 this.conn = conn;
                 
                 this.conn.on('open', () => {
-                    console.log("Connected to: " + this.conn.peer);
+                    console.log("Data Connection Open");
                     if(this.isHost) {
                         document.getElementById('conn-status').innerText = "PLAYER 2 CONNECTED!";
                         document.getElementById('conn-status').style.color = "#0f0";
@@ -283,7 +292,7 @@
                 });
 
                 this.conn.on('close', () => {
-                    alert("Connection Lost");
+                    alert("Opponent Disconnected");
                     location.reload();
                 });
             }
