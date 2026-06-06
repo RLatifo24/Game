@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>JOJOLI 3D - CONNECTION DEBUG</title>
+    <title>JOJOLI 3D - ROBUST NET</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://unpkg.com/jsnes/dist/jsnes.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -13,9 +13,8 @@
             --neon-blue: #00f3ff;
             --neon-pink: #ff00ff;
             --neon-green: #00ff00;
-            --neon-red: #ff0000;
             --bg: #050505;
-            --glass: rgba(0, 0, 0, 0.9);
+            --glass: rgba(0, 0, 0, 0.95);
         }
 
         * { box-sizing: border-box; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -34,14 +33,15 @@
         .panel {
             background: var(--glass); border: 2px solid var(--neon-blue);
             padding: 20px; text-align: center;
-            max-width: 90%; width: 450px;
-            box-shadow: 0 0 30px rgba(0, 243, 255, 0.2);
+            max-width: 95%; width: 480px;
+            box-shadow: 0 0 40px rgba(0, 243, 255, 0.15);
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            display: flex; flex-direction: column; gap: 10px;
+            display: flex; flex-direction: column; gap: 15px;
         }
         .hidden { display: none !important; }
         
         h1 { font-family: 'Orbitron'; color: var(--neon-blue); margin: 0 0 10px 0; text-transform: uppercase; }
+        h2 { font-size: 0.9rem; color: #aaa; margin: 0; }
         
         input {
             width: 100%; padding: 15px; background: #000; border: 1px solid #555;
@@ -57,16 +57,22 @@
         .btn:active { transform: scale(0.98); }
         .btn-sec { background: #333; color: white; }
 
+        /* WARNINGS */
+        .warn-box {
+            background: rgba(255,0,0,0.1); border: 1px solid red;
+            color: #ff9999; padding: 10px; font-size: 0.7rem; text-align: left;
+        }
+
         /* DEBUG CONSOLE */
         #debug-box {
-            background: #000; border: 1px solid #444; height: 100px; overflow-y: auto;
-            padding: 5px; font-size: 0.75rem; text-align: left; color: #aaa; margin-top: 10px;
-            font-family: monospace;
+            background: #000; border: 1px solid #444; height: 120px; overflow-y: auto;
+            padding: 5px; font-size: 0.7rem; text-align: left; color: #aaa; 
+            font-family: monospace; width: 100%; box-sizing: border-box;
         }
         .log-msg { margin: 2px 0; border-bottom: 1px solid #111; }
         .log-sys { color: yellow; }
-        .log-err { color: var(--neon-red); }
-        .log-ok { color: var(--neon-green); }
+        .log-err { color: #ff5555; }
+        .log-ok { color: #55ff55; }
 
         /* GAME HUD */
         #game-ui { display: none; width: 100%; height: 100%; position: relative; }
@@ -75,14 +81,14 @@
             position: absolute; top: 0; left: 0; right: 0;
             background: rgba(0,0,0,0.8); border-bottom: 1px solid #333;
             display: flex; justify-content: space-between; padding: 10px 20px;
-            font-family: 'Orbitron'; font-size: 0.8rem;
+            font-family: 'Orbitron'; font-size: 0.9rem;
         }
         .p-status { color: #555; font-weight: bold; }
         .p-status.on { color: var(--neon-green); text-shadow: 0 0 10px var(--neon-green); }
 
         /* CONTROLS */
         #controls-layer {
-            position: absolute; bottom: 120px; width: 100%;
+            position: absolute; bottom: 20px; width: 100%;
             display: flex; justify-content: space-between; padding: 0 40px; pointer-events: none;
         }
         @media (min-width: 1024px) { #controls-layer { display: none; } }
@@ -129,6 +135,7 @@
         <!-- Intro -->
         <div id="intro" class="panel interactive">
             <h1>Jojoli 3D</h1>
+            <h2>ROBUST CONNECTION EDITION</h2>
             <button class="btn" onclick="app.init()">SYSTEM START</button>
         </div>
 
@@ -138,6 +145,11 @@
             <button class="btn" onclick="app.createRoom()">CREATE ROOM</button>
             <input type="text" id="join-code" placeholder="ENTER FRIEND CODE">
             <button class="btn btn-sec" onclick="app.joinRoom()">JOIN ROOM</button>
+            <div class="warn-box">
+                ⚠️ TIMEOUT FIX: <br>
+                1. Do NOT use Incognito/Private mode.<br>
+                2. Use the SAME Browser for both tabs (e.g. Chrome + Chrome).
+            </div>
         </div>
 
         <!-- Room -->
@@ -145,12 +157,11 @@
             <h1 id="room-title">Waiting</h1>
             <h2 id="room-code" style="color:var(--neon-pink); letter-spacing:5px; margin:5px 0;">------</h2>
             
-            <!-- Debug Console -->
-            <div style="width:100%; text-align:left; font-size:0.7rem; color:#888;">CONNECTION LOG:</div>
+            <div style="width:100%; text-align:left; font-size:0.7rem; color:#888;">NETWORK LOG:</div>
             <div id="debug-box"></div>
 
             <div id="host-area" class="hidden" style="width:100%; border-top:1px solid #333; padding-top:10px;">
-                <p>1. UPLOAD ROM</p>
+                <p style="color:#aaa; font-size:0.8rem;">1. UPLOAD ROM</p>
                 <input type="file" id="rom-file" accept=".nes" style="display:none" onchange="app.fileSelected(this)">
                 <button class="btn btn-sec" onclick="document.getElementById('rom-file').click()">SELECT FILE</button>
                 
@@ -201,7 +212,7 @@
 
     <script>
         const C = { A:1, B:2, SEL:3, ST:4, U:5, D:6, L:7, R:8 };
-        const CH = 'jojoli_debug_v1';
+        const LS_KEY = 'jojoli_net_msg'; // Key for LocalStorage fallback
 
         class Jojoli {
             constructor() {
@@ -209,10 +220,26 @@
                 this.nes = null;
                 this.romData = null;
                 this.p2 = false;
-                this.net = new BroadcastChannel(CH);
-                this.net.onmessage = e => this.onMsg(e.data);
+                this.code = null;
 
-                // 3D
+                // --- ROBUST NETWORK INIT ---
+                // 1. BroadcastChannel (Standard)
+                this.bc = new BroadcastChannel('jojoli_v3');
+                this.bc.onmessage = e => this.onMsg(e.data);
+
+                // 2. LocalStorage (Fallback for strict environments)
+                window.addEventListener('storage', (e) => {
+                    if(e.key === LS_KEY && e.newValue) {
+                        try {
+                            const data = JSON.parse(e.newValue);
+                            this.onMsg(data);
+                            // Clear immediately to prevent re-triggering stale messages
+                            localStorage.removeItem(LS_KEY); 
+                        } catch(err) {}
+                    }
+                });
+
+                // 3D Setup
                 this.sc = new THREE.Scene();
                 this.cam = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 100);
                 this.cam.position.z = 3.5;
@@ -225,10 +252,20 @@
                 this.tex.minFilter = THREE.NearestFilter;
                 this.sc.add(new THREE.Mesh(new THREE.PlaneGeometry(3.5, 2.6), new THREE.MeshBasicMaterial({ map: this.tex })));
                 this.sc.add(new THREE.AmbientLight(1));
+                
                 this.loop3D();
                 
                 window.addEventListener('keydown', e => this.key(e.key, true));
                 window.addEventListener('keyup', e => this.key(e.key, false));
+            }
+
+            // --- ROBUST SENDER ---
+            send(data) {
+                const str = JSON.stringify(data);
+                // Try BroadcastChannel
+                try { this.bc.postMessage(data); } catch(e) { console.log("BC Fail"); }
+                // Try LocalStorage
+                try { localStorage.setItem(LS_KEY, str); } catch(e) { console.log("LS Fail"); }
             }
 
             log(txt, type='sys') {
@@ -236,18 +273,18 @@
                 if(box) {
                     const d = document.createElement('div');
                     d.className = 'log-msg log-' + type;
-                    d.innerText = '> ' + txt;
+                    const time = new Date().toLocaleTimeString().split(' ')[0];
+                    d.innerText = `[${time}] ${txt}`;
                     box.prepend(d);
-                    // Limit history
-                    if(box.children.length > 20) box.lastChild.remove();
+                    if(box.children.length > 15) box.lastChild.remove();
                 }
-                console.log(txt);
+                console.log(`[${type}] ${txt}`);
             }
 
             init() {
                 document.getElementById('intro').classList.add('hidden');
                 document.getElementById('menu').classList.remove('hidden');
-                this.log("System Ready");
+                this.log("System Ready. Dual-Channel Net Active.");
             }
 
             createRoom() {
@@ -256,8 +293,8 @@
                 this.showRoom();
                 document.getElementById('host-area').classList.remove('hidden');
                 document.getElementById('room-code-mini').innerText = this.code;
-                this.log("Host Created Room: " + this.code, "sys");
-                this.log("Listening for P2...", "sys");
+                this.log("Created Room: " + this.code);
+                this.log("Listening via BC & LS...");
             }
 
             joinRoom() {
@@ -266,16 +303,16 @@
                 this.isHost = false;
                 this.code = c;
                 this.showRoom();
-                this.log("Client joining: " + c, "sys");
+                this.log("Joining: " + c);
                 
-                // Send Join Request
-                this.net.postMessage({ t: 'J', c: c });
-                this.log("Sent Join Request...", "ok");
+                this.send({ t: 'J', c: c });
+                this.log("Sent Dual-Channel Request...", "ok");
                 
-                // Failsafe timeout
                 setTimeout(() => {
-                    if(!this.p2 && !this.isHost) this.log("Connection Timeout. Check browser tabs.", "err");
-                }, 5000);
+                    if(!this.p2 && !this.isHost) {
+                        this.log("TIMEOUT. Ensure tabs are in SAME browser (Chrome+Chrome) and NOT Incognito.", "err");
+                    }
+                }, 6000);
             }
 
             showRoom() {
@@ -291,7 +328,7 @@
                 r.onload = e => {
                     this.romData = e.target.result;
                     document.getElementById('start-area').classList.remove('hidden');
-                    this.log("ROM Loaded. Ready to Start.", "ok");
+                    this.log("ROM Loaded.", "ok");
                 };
                 r.readAsArrayBuffer(f);
             }
@@ -319,7 +356,7 @@
 
                         if(this.isHost && this.p2) {
                             createImageBitmap(cvs).then(b => {
-                                this.net.postMessage({ t: 'V', b: b }, [b]);
+                                this.send({ t: 'V', b: b }); // Note: Can't transfer in LS, but BC handles it
                             });
                         }
                     },
@@ -327,9 +364,8 @@
                 });
                 this.nes.loadROM(this.romData);
                 this.loop();
-                this.log("Game Loop Started");
                 
-                if(this.p2) this.net.postMessage({ t: 'R', d: this.romData });
+                if(this.p2) this.send({ t: 'R', d: this.romData }); // ROM data large, might fail LS, but BC handles
             }
 
             loop() {
@@ -346,8 +382,8 @@
 
             btn(p, b, d) {
                 this.inp(p, b, d);
-                if(!this.isHost && p===2) this.net.postMessage({ t:'I', b:b, d:d });
-                if(this.isHost && p===2) this.log("P2 INPUT RECEIVED: " + b, "ok");
+                if(!this.isHost && p===2) this.send({ t:'I', b:b, d:d });
+                if(this.isHost && p===2) this.log("P2 Input: " + b, "ok");
             }
 
             inp(p, b, d) {
@@ -375,36 +411,33 @@
             }
 
             onMsg(d) {
-                this.log("Network Msg: " + d.t, "sys");
+                this.log("Received: " + d.t);
                 
                 if(this.isHost) {
                     if(d.t==='J') {
-                        this.log("Join Req Code: " + d.c + " vs My: " + this.code);
+                        this.log("Join Req: " + d.c);
                         if(d.c===this.code) {
                             this.p2 = true;
                             const s = document.getElementById('p2-stat');
                             s.classList.add('on');
                             s.innerText = "P2: ONLINE";
-                            s.style.color = "#00ff00";
                             
-                            this.log("P2 CONNECTED SUCCESSFULLY!", "ok");
-                            this.net.postMessage({ t: 'A' });
-                            if(this.romData) this.net.postMessage({ t: 'R', d: this.romData });
+                            this.log("P2 CONNECTED!", "ok");
+                            this.send({ t: 'A' });
+                            if(this.romData) this.send({ t: 'R', d: this.romData });
                         } else {
-                            this.log("Code Mismatch! P2 Rejected.", "err");
+                            this.log("Code Mismatch", "err");
                         }
                     }
-                    if(d.t==='I') {
-                        this.inp(2, d.b, d.d);
-                    }
+                    if(d.t==='I') this.inp(2, d.b, d.d);
                 } else {
                     if(d.t==='A') {
-                        this.log("Host Accepted Connection", "ok");
+                        this.log("Host Accepted", "ok");
                         document.getElementById('room-title').innerText = "CONNECTED";
-                        document.getElementById('room-title').style.color = "#00ff00";
+                        document.getElementById('room-title').style.color = "#0f0";
                     }
                     if(d.t==='R') {
-                        this.log("ROM Received. Launching...", "ok");
+                        this.log("ROM Received", "ok");
                         this.launchGame();
                     }
                     if(d.t==='V') {
