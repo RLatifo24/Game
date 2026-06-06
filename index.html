@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jojoli Online - STABLE VIDEO STREAM</title>
+    <title>Jojoli Online - Universal Connect</title>
     
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://unpkg.com/jsnes@1.2.1/dist/jsnes.min.js"></script>
+    <!-- Use specific versions with cache buster to ensure fresh load -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js?v=2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js?v=2"></script>
+    <script src="https://unpkg.com/jsnes@1.2.1/dist/jsnes.min.js?v=2"></script>
     
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 
@@ -17,6 +18,7 @@
             --neon-pink: #ff00ff;
             --bg: #050505;
             --glass: rgba(0, 0, 0, 0.95);
+            --error: #ff3333;
         }
 
         * { box-sizing: border-box; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -28,15 +30,11 @@
             display: flex; justify-content: center; align-items: center;
         }
 
-        /* 3D Layer */
         #world { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
-        
-        /* Hidden Logic Elements */
         #screen-container { display: none; }
         canvas#nes-canvas { display: block; width: 256px; height: 240px; }
-        video#remote-video { display: none; } /* Client receives stream here */
+        video#remote-video { display: none; }
 
-        /* UI Layer */
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
         .interactive { pointer-events: auto; }
 
@@ -50,22 +48,26 @@
         }
         .hidden { display: none !important; }
         
-        h1 { font-family: 'Orbitron'; color: var(--neon-blue); margin: 0; text-transform: uppercase; text-shadow: 0 0 10px var(--neon-blue); }
+        h1 { font-family: 'Orbitron'; color: var(--neon-blue); margin: 0; text-transform: uppercase; }
         
         .mode-btn {
             background: var(--neon-blue); color: black; border: none;
             padding: 15px; font-family: 'Orbitron'; font-size: 1.1rem; cursor: pointer;
             font-weight: bold; transition: 0.2s; text-transform: uppercase;
         }
-        .mode-btn:hover { transform: scale(1.05); box-shadow: 0 0 15px var(--neon-blue); }
-        .mode-btn:disabled { background: #555; cursor: not-allowed; }
+        .mode-btn:hover { transform: scale(1.05); }
+        .mode-btn:disabled { background: #333; color: #666; cursor: wait; }
         
         input {
             width: 100%; padding: 10px; background: #000; border: 1px solid #555;
-            color: white; font-family: monospace; text-align: center; font-size: 1.1rem;
+            color: white; font-family: monospace; text-align: center; font-size: 1.2rem;
         }
+        input:focus { outline: 1px solid var(--neon-blue); }
 
-        /* Game UI */
+        .log-text { font-size: 0.8rem; min-height: 1.2em; margin-top: 5px; }
+        .error-text { color: var(--error); }
+        .success-text { color: #0f0; }
+
         #game-ui { display: none; width: 100%; height: 100%; position: relative; }
         
         .status-bar {
@@ -75,12 +77,11 @@
             font-family: 'Orbitron'; font-size: 0.9rem; z-index: 20; pointer-events: auto;
         }
 
-        /* Mobile Controls */
         #controls-layer {
             position: absolute; bottom: 20px; width: 100%;
             display: flex; justify-content: space-between; padding: 0 20px; pointer-events: none; z-index: 20;
         }
-        @media (min-width: 1024px) { #controls-layer { opacity: 0.2; } }
+        @media (min-width: 1024px) { #controls-layer { opacity: 0.3; } }
 
         .c-zone { pointer-events: auto; display: flex; flex-direction: column; gap: 20px; align-items: center; }
         .d-pad { display: grid; grid-template-columns: 50px 50px 50px; grid-template-rows: 50px 50px 50px; gap: 5px; }
@@ -98,61 +99,55 @@
             font-weight: bold; font-size: 1.2rem; box-shadow: 0 0 10px var(--neon-pink);
         }
         .ab-btn:active, .ab-btn.pressed { transform: scale(0.9); background: white; }
-
-        .log-msg { font-size: 0.8rem; margin-top: 5px; min-height: 1.2em; }
     </style>
 </head>
 <body>
 
-    <!-- 3D Scene -->
     <div id="world"></div>
-    
-    <!-- Hidden Canvas (Host Source) -->
     <div id="screen-container"><canvas id="nes-canvas" width="256" height="240"></canvas></div>
-    
-    <!-- Hidden Video (Client Stream Receiver) -->
     <video id="remote-video" autoplay playsinline muted></video>
 
     <div id="ui-layer">
-        <!-- Intro -->
+        <!-- Intro Panel -->
         <div id="intro" class="panel interactive">
             <h1>Jojoli Online</h1>
-            <div id="peer-status" style="color:#aaa; font-size:0.9rem;">Initializing Network...</div>
+            <div id="sys-status" class="log-text" style="color:#aaa">Initializing Network Relay...</div>
             <hr style="border-color:#333; width:100%">
             <button class="mode-btn" id="btn-create" onclick="app.createRoom()" disabled>HOST GAME</button>
             <button class="mode-btn" id="btn-join" onclick="app.showJoin()" disabled>JOIN GAME</button>
+            <div id="intro-error" class="log-text error-text"></div>
         </div>
 
         <!-- Host Panel -->
         <div id="create-panel" class="panel interactive hidden">
-            <h1>HOST ROOM</h1>
-            <p style="font-size:0.8rem; color:#ccc">Send this code to Player 2:</p>
+            <h1>HOSTING</h1>
+            <p style="font-size:0.8rem; color:#ccc">Copy this code:</p>
             <input type="text" id="my-id" readonly onclick="this.select()" style="color:var(--neon-blue)">
-            <div id="conn-status" class="log-msg" style="color:#aaa">Waiting for player...</div>
+            <div id="host-status" class="log-text" style="color:#aaa">Waiting for player...</div>
             
             <div id="host-controls" class="hidden">
                 <hr style="border-color:#333">
-                <p style="color:#0f0; font-weight:bold;">PLAYER 2 CONNECTED</p>
-                <p>Select .NES ROM file:</p>
+                <div class="success-text">PLAYER CONNECTED!</div>
+                <p>Select .NES ROM:</p>
                 <input type="file" id="rom-file" accept=".nes" style="display:none" onchange="app.fileSelected(this)">
-                <button class="mode-btn" onclick="document.getElementById('rom-file').click()">UPLOAD ROM</button>
+                <button class="mode-btn" onclick="document.getElementById('rom-file').click()">UPLOAD & PLAY</button>
             </div>
         </div>
 
         <!-- Join Panel -->
         <div id="join-panel" class="panel interactive hidden">
             <h1>JOIN GAME</h1>
-            <p>Enter Host Code:</p>
-            <input type="text" id="host-id" placeholder="PASTE CODE">
-            <button class="mode-btn" onclick="app.connectToHost()">CONNECT</button>
-            <div id="join-status" class="log-msg"></div>
+            <p>Paste Host Code:</p>
+            <input type="text" id="host-id" placeholder="PASTE CODE HERE">
+            <button class="mode-btn" onclick="app.connectToHost()" id="btn-connect-action">CONNECT</button>
+            <div id="join-status" class="log-text"></div>
         </div>
 
         <!-- Gameplay UI -->
         <div id="game-ui">
             <div class="status-bar">
                 <span id="p1-stat">P1 (HOST)</span>
-                <span style="color:#00f3ff">ONLINE</span>
+                <span style="color:#00f3ff">LIVE</span>
                 <span id="p2-stat">P2 (CLIENT)</span>
             </div>
 
@@ -185,20 +180,27 @@
             constructor() {
                 this.isHost = false;
                 this.nes = null;
-                this.conn = null; // Data Connection (Inputs)
-                this.call = null; // Media Connection (Video)
+                this.conn = null; // Data
+                this.call = null; // Video
                 this.romData = null;
                 this.is3D = false;
 
-                // Check Libs
                 if(typeof Peer === 'undefined' || typeof THREE === 'undefined' || typeof jsnes === 'undefined') {
-                    alert("Error: Libraries failed to load. Please refresh.");
+                    this.logError("Critical Error: Libraries failed to load. Check internet/adblocker.");
                     return;
                 }
 
                 this.initGraphics();
-                this.initPeerJS();
+                this.initPeerJS(); // This now includes TURN servers
                 this.bindInputs();
+            }
+
+            logError(msg) {
+                console.error(msg);
+                const el = document.getElementById('intro-error');
+                if(el) el.innerText = msg;
+                const status = document.getElementById('sys-status');
+                if(status) status.innerText = "ERROR";
             }
 
             initGraphics() {
@@ -213,7 +215,6 @@
                     
                     this.tex = new THREE.CanvasTexture(cvs);
                     this.tex.minFilter = THREE.NearestFilter;
-                    this.tex.magFilter = THREE.NearestFilter;
                     
                     this.sc.add(new THREE.Mesh(new THREE.PlaneGeometry(3.5, 2.6), new THREE.MeshBasicMaterial({ map: this.tex })));
                     this.sc.add(new THREE.AmbientLight(1));
@@ -225,31 +226,52 @@
 
             loop3D() {
                 requestAnimationFrame(() => this.loop3D());
-                
-                // CLIENT: Render the video stream to the canvas, then update 3D texture
+                // Client: Draw Video -> Canvas -> Texture
                 if(!this.isHost) {
                     const vid = document.getElementById('remote-video');
-                    const cvs = document.getElementById('nes-canvas');
-                    if(vid.readyState === 4) { // HAVE_ENOUGH_DATA
+                    if(vid.readyState === 4) {
+                        const cvs = document.getElementById('nes-canvas');
                         const ctx = cvs.getContext('2d');
                         ctx.drawImage(vid, 0, 0, 256, 240);
                         if(this.tex) this.tex.needsUpdate = true;
                     }
-                } 
-                // HOST: The NES draws to canvas directly, we just update texture
-                else {
+                } else {
                     if(this.tex) this.tex.needsUpdate = true;
                 }
-
                 this.ren.render(this.sc, this.cam);
             }
 
             initPeerJS() {
-                this.peer = new Peer(null, { debug: 1 });
+                document.getElementById('sys-status').innerText = "Connecting to Relay Server...";
+
+                // CONFIGURATION: Using OpenRelay as a free TURN server to bypass Firewalls
+                const peerConfig = {
+                    debug: 2,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:global.stun.twilio.com:3478' },
+                            // Free TURN credentials from openrelay project
+                            { 
+                                urls: 'turn:openrelay.metered.ca:443', 
+                                username: 'openrelayproject', 
+                                credential: 'openrelayproject' 
+                            },
+                            { 
+                                urls: 'turn:openrelay.metered.ca:80', 
+                                username: 'openrelayproject', 
+                                credential: 'openrelayproject' 
+                            }
+                        ]
+                    }
+                };
+
+                this.peer = new Peer(null, peerConfig);
 
                 this.peer.on('open', (id) => {
-                    document.getElementById('peer-status').innerText = "System Ready";
-                    document.getElementById('peer-status').style.color = "#0f0";
+                    console.log('My ID:', id);
+                    document.getElementById('sys-status').innerText = "System Ready";
+                    document.getElementById('sys-status').className = "log-text success-text";
                     document.getElementById('btn-create').disabled = false;
                     document.getElementById('btn-join').disabled = false;
                 });
@@ -258,22 +280,37 @@
                     this.setupConnection(conn);
                 });
 
-                // Client receives the VIDEO CALL here
                 this.peer.on('call', (call) => {
-                    // We are the client. Answer the call (we don't send video back, only inputs)
-                    call.answer(); 
+                    // Client answers video call
+                    call.answer();
                     call.on('stream', (remoteStream) => {
-                        console.log("Video stream received");
+                        console.log("Video received");
                         const vid = document.getElementById('remote-video');
                         vid.srcObject = remoteStream;
                         vid.play();
                     });
-                    this.call = call; // Keep reference
+                    this.call = call;
                 });
 
                 this.peer.on('error', (err) => {
                     console.error(err);
-                    alert("Connection Error: " + err.type);
+                    let msg = "Connection Error";
+                    if(err.type === 'peer-unavailable') msg = "Host ID not found.\nCheck the code or ensure Host is online.";
+                    if(err.type === 'network') msg = "Network blocked.\nDisable VPN or try different Wi-Fi.";
+                    if(err.type === 'disconnected') msg = "Lost connection to server.";
+                    
+                    alert(msg);
+                    
+                    // Update UI if in join panel
+                    const status = document.getElementById('join-status');
+                    if(status) {
+                        status.innerText = msg;
+                        status.className = "log-text error-text";
+                        document.getElementById('btn-connect-action').disabled = false;
+                        document.getElementById('btn-connect-action').innerText = "RETRY";
+                    } else {
+                        this.logError(msg);
+                    }
                 });
             }
 
@@ -289,11 +326,20 @@
 
             connectToHost() {
                 const hostId = document.getElementById('host-id').value.trim();
-                if(!hostId) return;
+                if(!hostId) {
+                    alert("Please enter a code");
+                    return;
+                }
                 
-                document.getElementById('join-status').innerText = "Connecting...";
+                const status = document.getElementById('join-status');
+                const btn = document.getElementById('btn-connect-action');
                 
-                // 1. Connect Data Channel (Inputs)
+                status.innerText = "Connecting (This may take 10s)...";
+                status.className = "log-text";
+                btn.disabled = true;
+                btn.innerText = "CONNECTING...";
+
+                // Connect Data Channel
                 const conn = this.peer.connect(hostId, { reliable: true });
                 this.setupConnection(conn);
             }
@@ -301,14 +347,24 @@
             setupConnection(conn) {
                 this.conn = conn;
                 
+                // Timeout handling
+                const timeout = setTimeout(() => {
+                    if(!this.conn.open) {
+                        alert("Connection Timeout. \n\nIf this fails, you might be behind a strict firewall.");
+                        document.getElementById('btn-connect-action').disabled = false;
+                        document.getElementById('btn-connect-action').innerText = "RETRY";
+                    }
+                }, 15000);
+
                 conn.on('open', () => {
+                    clearTimeout(timeout);
+                    console.log("Data Connection Open");
                     if(this.isHost) {
-                        document.getElementById('conn-status').innerText = "Player 2 Connected!";
-                        document.getElementById('conn-status').style.color = "#0f0";
+                        document.getElementById('host-status').innerText = "Connected!";
+                        document.getElementById('host-status').className = "log-text success-text";
                         document.getElementById('host-controls').classList.remove('hidden');
                     } else {
-                        document.getElementById('join-panel').classList.add('hidden');
-                        document.getElementById('game-ui').style.display = 'block';
+                        this.switchPanel('game-ui');
                         document.getElementById('p1-stat').innerText = "P1 (HOST)";
                         document.getElementById('p2-stat').innerText = "P2 (YOU)";
                     }
@@ -317,7 +373,7 @@
                 conn.on('data', (data) => this.handleData(data));
 
                 conn.on('close', () => {
-                    alert("Disconnected from Game");
+                    alert("Disconnected");
                     location.reload();
                 });
             }
@@ -332,13 +388,14 @@
                     }
                 } 
                 else {
-                    if(data.t === 'R') { // ROM (Base64)
+                    if(data.t === 'R') { // ROM
                         this.loadRomFromBase64(data.d);
                     }
                 }
             }
 
-            // --- ROM HANDLING ---
+            // --- ROM & EMULATION ---
+
             fileSelected(inp) {
                 const f = inp.files[0];
                 if(!f) return;
@@ -358,10 +415,14 @@
             }
 
             loadRomFromBase64(b64) {
-                const binStr = window.atob(b64);
-                const bytes = new Uint8Array(binStr.length);
-                for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
-                this.startGame(bytes);
+                try {
+                    const binStr = window.atob(b64);
+                    const bytes = new Uint8Array(binStr.length);
+                    for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+                    this.startGame(bytes);
+                } catch(e) {
+                    alert("Error loading ROM.");
+                }
             }
 
             startGame(romUint8Array) {
@@ -387,20 +448,16 @@
                 try {
                     this.nes.loadROM(romUint8Array);
                     
-                    // --- START VIDEO STREAM (HOST ONLY) ---
                     if(this.isHost) {
-                        // Capture stream at 30 FPS (NES is 60, but 30 saves bandwidth)
                         const stream = cvs.captureStream(30);
-                        // Call the connected peer
                         if(this.conn && this.conn.open) {
                             this.call = this.peer.call(this.conn.peer, stream);
-                            console.log("Video stream started");
                         }
                     }
                     
                     this.loop();
                 } catch(e) {
-                    alert("ROM Load Error");
+                    alert("ROM invalid");
                     console.error(e);
                 }
             }
@@ -435,11 +492,7 @@
             }
 
             simKey(key, isDown) {
-                // Prevent game scrolling
-                if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight", " "].includes(key)) {
-                    // Prevent default only if game is active
-                    if(this.nes) event.preventDefault();
-                }
+                if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(key) && this.nes) event.preventDefault();
 
                 let btn = null, pl = 1;
                 let k = key.toLowerCase();
@@ -448,7 +501,6 @@
                 if(k==='arrowup') btn=C.U; if(k==='arrowdown') btn=C.D;
                 if(k==='arrowleft') btn=C.L; if(k==='arrowright') btn=C.R;
                 if(k==='z') btn=C.A; if(k==='x') btn=C.B;
-                if(k==='enter') btn=C.ST; if(k==='shift') btn=C.SEL;
                 
                 // P2
                 if(!btn) {
@@ -456,16 +508,13 @@
                     if(k==='w') btn=C.U; if(k==='s') btn=C.D;
                     if(k==='a') btn=C.L; if(k==='d') btn=C.R;
                     if(k==='f') btn=C.A; if(k==='g') btn=C.B;
-                    if(k==='h') btn=C.ST; if(k==='j') btn=C.SEL;
                 }
                 
                 if(btn) {
-                    // Local
                     if(this.nes) {
                         if(isDown) this.nes.buttonDown(pl, btn);
                         else this.nes.buttonUp(pl, btn);
                     }
-                    // Network (Only Client sends P2 inputs)
                     if(!this.isHost && pl === 2) {
                         this.send({ t: 'I', b: btn, d: isDown });
                     }
