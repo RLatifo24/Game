@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jojoli Online - Final</title>
+    <title>Jojoli Online - Robust</title>
     
     <script src="https://cdn.jsdelivr.net/npm/peerjs@1.3.2/dist/peerjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
@@ -30,15 +30,11 @@
             display: flex; justify-content: center; align-items: center;
         }
 
-        /* 3D World */
         #world { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
-        
-        /* Hidden Logic Elements */
         #screen-container { display: none; }
         canvas#nes-canvas { display: block; width: 256px; height: 240px; }
         video#remote-video { display: none; }
 
-        /* UI Layer */
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
         .interactive { pointer-events: auto; }
 
@@ -62,8 +58,7 @@
         .mode-btn:hover { background: var(--neon-blue); color: black; box-shadow: 0 0 15px var(--neon-blue); }
         .mode-btn:disabled { border-color: #333; color: #333; cursor: not-allowed; }
         .mode-btn.upload {
-            background: var(--green); color: black; border-color: var(--green);
-            font-size: 1.2rem;
+            background: var(--green); color: black; border-color: var(--green); font-size: 1.2rem;
         }
         
         input {
@@ -71,7 +66,6 @@
             color: white; font-family: monospace; text-align: center; font-size: 1.1rem; letter-spacing: 2px;
         }
 
-        /* Status Indicators */
         .status-box {
             background: #111; padding: 10px; border: 1px solid #333; font-size: 0.9rem;
             min-height: 40px; display: flex; justify-content: center; align-items: center;
@@ -80,14 +74,12 @@
 
         .log-text { font-size: 0.8rem; min-height: 1.2em; color: #aaa; margin-top: 5px; }
 
-        /* Game UI */
         #game-ui { display: none; width: 100%; height: 100%; position: relative; }
         
-        /* Waiting Overlay for P2 */
         #wait-overlay {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             text-align: center; color: var(--neon-blue); font-family: 'Orbitron';
-            background: rgba(0,0,0,0.8); padding: 20px; border: 1px solid var(--neon-blue);
+            background: rgba(0,0,0,0.9); padding: 20px; border: 1px solid var(--neon-blue);
             z-index: 50;
         }
         
@@ -132,14 +124,10 @@
         <!-- Intro Panel -->
         <div id="intro" class="panel interactive">
             <h1>JOJOLI LINK</h1>
-            
             <div class="status-box" id="intro-status">Connecting to Server...</div>
-            
             <hr style="border-color:#222; width:100%">
-            
             <button class="mode-btn" id="btn-create" onclick="app.createRoom()" disabled>HOST GAME (P1)</button>
             <button class="mode-btn" id="btn-join" onclick="app.showJoin()" disabled>JOIN GAME (P2)</button>
-            
             <div id="intro-log" class="log-text"></div>
         </div>
 
@@ -148,13 +136,7 @@
             <h1>HOST ROOM</h1>
             <p style="font-size:0.8rem; color:#888">Send this code to your friend:</p>
             <input type="text" id="my-id" readonly onclick="this.select()">
-            
-            <!-- Host Status -->
-            <div id="host-diag" class="status-box" style="border-color:#555; color:#aaa">
-                Waiting for Player 2...
-            </div>
-            
-            <!-- Upload Button (Hidden until connected) -->
+            <div id="host-diag" class="status-box" style="border-color:#555; color:#aaa">Waiting for Player 2...</div>
             <div id="host-controls" class="hidden" style="margin-top: 20px;">
                 <div style="color:var(--green); font-weight:bold; margin-bottom:10px;">PLAYER 2 JOINED!</div>
                 <p>Select a .NES ROM file to start:</p>
@@ -162,6 +144,7 @@
                 <button class="mode-btn upload" onclick="document.getElementById('rom-file').click()">
                     📂 SELECT ROM FILE
                 </button>
+                <div id="load-status" class="log-text" style="color:orange"></div>
             </div>
         </div>
 
@@ -170,20 +153,16 @@
             <h1>JOIN GAME</h1>
             <p style="font-size:0.8rem; color:#888">Paste Host Code:</p>
             <input type="text" id="host-id" placeholder="PASTE CODE HERE" autocomplete="off">
-            
             <button class="mode-btn" onclick="app.connectToHost()" id="btn-connect">CONNECT</button>
-            
             <div id="join-log" class="log-text">Waiting...</div>
         </div>
 
         <!-- Game UI -->
         <div id="game-ui">
-            <!-- Overlay for P2 -->
             <div id="wait-overlay">
                 <div style="font-size:2rem; margin-bottom:10px;">⏳</div>
                 WAITING FOR HOST<br>TO LOAD ROM...
             </div>
-
             <div class="status-bar">
                 <span>P1 (HOST)</span>
                 <span style="color:#00f3ff">LINK ACTIVE</span>
@@ -258,7 +237,6 @@
 
             loop3D() {
                 requestAnimationFrame(() => this.loop3D());
-                // Client: Draw Video -> Canvas -> Texture
                 if(!this.isHost) {
                     const vid = document.getElementById('remote-video');
                     if(vid.readyState === 4) {
@@ -267,7 +245,6 @@
                         if(this.tex) this.tex.needsUpdate = true;
                     }
                 } else {
-                    // Host: Draw NES -> Canvas -> Texture
                     if(this.tex) this.tex.needsUpdate = true;
                 }
                 if(this.ren) this.ren.render(this.sc, this.cam);
@@ -303,8 +280,6 @@
                         diag.innerText = "CONNECTED!";
                         diag.style.color = "var(--green)";
                         diag.style.borderColor = "var(--green)";
-                        
-                        // Show Upload Button
                         document.getElementById('host-controls').classList.remove('hidden');
                     }
                     this.setupConnection(conn);
@@ -316,8 +291,6 @@
                         const vid = document.getElementById('remote-video');
                         vid.srcObject = s;
                         vid.play();
-                        
-                        // Hide "Waiting" overlay on P2
                         document.getElementById('wait-overlay').style.display = 'none';
                     });
                     this.call = call;
@@ -348,27 +321,21 @@
             connectToHost() {
                 let id = document.getElementById('host-id').value.trim().replace(/\s/g, '');
                 if(!id) return alert("Enter ID");
-                
                 const btn = document.getElementById('btn-connect');
                 btn.disabled = true;
                 btn.innerText = "CONNECTING...";
                 this.log("Negotiating...", "join-log");
-                
                 const conn = this.peer.connect(id, { reliable: true });
                 this.setupConnection(conn);
             }
 
             setupConnection(conn) {
                 this.conn = conn;
-                
                 const timeout = setTimeout(() => {
                     if(!this.conn.open) {
-                        alert("Connection Failed. Host might be offline.");
+                        alert("Connection Failed.");
                         const btn = document.getElementById('btn-connect');
-                        if(btn) {
-                            btn.disabled = false;
-                            btn.innerText = "RETRY";
-                        }
+                        if(btn) { btn.disabled = false; btn.innerText = "RETRY"; }
                         this.log("Timed Out", "join-log");
                     }
                 }, 30000);
@@ -377,13 +344,10 @@
                     clearTimeout(timeout);
                     console.log("Data Connection Open");
                     this.log("Connected!", "join-log");
-                    if(!this.isHost) {
-                        this.switchPanel('game-ui');
-                    }
+                    if(!this.isHost) this.switchPanel('game-ui');
                 });
 
                 conn.on('data', (d) => {
-                    // Host Receives P2 Inputs
                     if(this.isHost && d.t === 'I' && this.nes) {
                         d.d ? this.nes.buttonDown(2, d.b) : this.nes.buttonUp(2, d.b);
                     }
@@ -398,44 +362,86 @@
             fileSelected(inp) {
                 const f = inp.files[0];
                 if(!f) return;
+
+                // UI Feedback
+                const status = document.getElementById('load-status');
+                status.innerText = "Reading file...";
+                status.style.color = "white";
+
                 const r = new FileReader();
                 r.onload = e => {
-                    const buf = e.target.result;
-                    const u8 = new Uint8Array(buf);
-                    this.startGame(u8);
+                    try {
+                        const buf = e.target.result;
+                        const u8 = new Uint8Array(buf);
+                        
+                        if(u8.length === 0) throw new Error("File is empty.");
+                        
+                        status.innerText = "Starting Emulator...";
+                        status.style.color = "var(--neon-blue)";
+                        
+                        this.startGame(u8);
+                    } catch(err) {
+                        alert("Error reading file: " + err.message);
+                        status.innerText = "Error";
+                        status.style.color = "var(--red)";
+                    }
                 };
                 r.readAsArrayBuffer(f);
             }
 
             startGame(romUint8Array) {
-                // Hide all panels, show Game UI
-                document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
-                document.getElementById('game-ui').style.display = 'block';
+                try {
+                    // 1. Library Check
+                    if (typeof jsnes === 'undefined') {
+                        throw new Error("Emulator library (jsNES) failed to load.");
+                    }
 
-                const cvs = document.getElementById('nes-canvas');
-                const ctx = cvs.getContext('2d');
-                const img = ctx.createImageData(256,240);
+                    // 2. UI Switch
+                    document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
+                    document.getElementById('game-ui').style.display = 'block';
+                    document.getElementById('load-status').innerText = ""; // Clear loading text
 
-                this.nes = new jsnes.NES({
-                    onFrame: (buffer) => {
-                        const d = img.data;
-                        for(let i=0; i<buffer.length; i++) {
-                            const c = buffer[i];
-                            d[i*4]=c&0xFF; d[i*4+1]=(c>>8)&0xFF; d[i*4+2]=(c>>16)&0xFF; d[i*4+3]=255;
-                        }
-                        ctx.putImageData(img, 0, 0);
-                        
-                        // Start Video Stream (Host Only) - ONCE
-                        if(this.isHost && this.conn && this.conn.open && !this.call) {
-                            const stream = cvs.captureStream(30); // 30 FPS
-                            this.call = this.peer.call(this.conn.peer, stream);
-                        }
-                    },
-                    onAudioSample: ()=>{}
-                });
+                    // 3. Setup Canvas
+                    const cvs = document.getElementById('nes-canvas');
+                    const ctx = cvs.getContext('2d');
+                    const img = ctx.createImageData(256,240);
 
-                this.nes.loadROM(romUint8Array);
-                this.loop();
+                    // 4. Initialize Emulator
+                    this.nes = new jsnes.NES({
+                        onFrame: (buffer) => {
+                            const d = img.data;
+                            for(let i=0; i<buffer.length; i++) {
+                                const c = buffer[i];
+                                d[i*4]=c&0xFF; d[i*4+1]=(c>>8)&0xFF; d[i*4+2]=(c>>16)&0xFF; d[i*4+3]=255;
+                            }
+                            ctx.putImageData(img, 0, 0);
+                        },
+                        onAudioSample: ()=>{} // Stub to prevent audio hangs
+                    });
+
+                    // 5. Load ROM
+                    this.nes.loadROM(romUint8Array);
+
+                    // 6. Start Video Stream (Host Only) - MOVED OUTSIDE LOOP
+                    if(this.isHost && this.conn && this.conn.open && !this.call) {
+                        const stream = cvs.captureStream(30);
+                        this.call = this.peer.call(this.conn.peer, stream);
+                        console.log("Video stream started");
+                    }
+
+                    // 7. Start Loop
+                    this.loop();
+
+                } catch (e) {
+                    console.error(e);
+                    alert("GAME START FAILED: " + e.message + "\n\nMake sure you selected a valid .NES ROM file.");
+                    // Fallback UI
+                    document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
+                    document.getElementById('create-panel').classList.remove('hidden');
+                    document.getElementById('host-controls').classList.remove('hidden');
+                    document.getElementById('load-status').innerText = "Start Failed";
+                    document.getElementById('load-status').style.color = "var(--red)";
+                }
             }
 
             loop() {
@@ -460,28 +466,15 @@
             key(k, d) {
                 let btn=null, pl=1;
                 k=k.toLowerCase();
-                
-                // P1 Controls
                 if(k==='arrowup') btn=C.U; if(k==='arrowdown') btn=C.D;
                 if(k==='arrowleft') btn=C.L; if(k==='arrowright') btn=C.R;
                 if(k==='z') btn=C.A; if(k==='x') btn=C.B;
-                
-                // P2 Controls
-                if(!btn) {
-                    pl=2;
-                    if(k==='w') btn=C.U; if(k==='s') btn=C.D;
-                    if(k==='a') btn=C.L; if(k==='d') btn=C.R;
-                    if(k==='f') btn=C.A; if(k==='g') btn=C.B;
-                }
-                
+                if(!btn) { pl=2; if(k==='w') btn=C.U; if(k==='s') btn=C.D; if(k==='a') btn=C.L; if(k==='d') btn=C.R; if(k==='f') btn=C.A; if(k==='g') btn=C.B; }
                 if(btn) {
-                    // Local Injection
                     if(this.nes) {
                         if(d) this.nes.buttonDown(pl, btn);
                         else this.nes.buttonUp(pl, btn);
                     }
-                    
-                    // Network Send (Only P2 inputs to Host)
                     if(!this.isHost && pl === 2) {
                         this.conn.send({ t: 'I', b: btn, d: d });
                     }
