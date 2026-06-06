@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jojoli Online - Auto Negotiate</title>
+    <title>Jojoli Online - Host Diagnostics</title>
     
     <script src="https://cdn.jsdelivr.net/npm/peerjs@1.3.2/dist/peerjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
@@ -17,7 +17,7 @@
             --bg: #050505;
             --glass: rgba(20, 20, 20, 0.98);
             --green: #00ff00;
-            --red: #ff3333;
+            --orange: #ffaa00;
         }
 
         * { box-sizing: border-box; touch-action: none; user-select: none; }
@@ -63,15 +63,12 @@
         }
 
         .status-box {
-            background: #111; padding: 8px; border: 1px solid #333; font-size: 0.8rem; margin-bottom: 5px;
-            display: flex; justify-content: space-between; align-items: center;
+            background: #111; padding: 10px; border: 1px solid #333; font-size: 0.8rem;
+            min-height: 40px; display: flex; justify-content: center; align-items: center;
         }
         
-        .led { width: 10px; height: 10px; border-radius: 50%; background: #333; }
-        .led.on { background: var(--green); box-shadow: 0 0 5px var(--green); }
-
         .log-text { font-size: 0.8rem; min-height: 1.2em; color: #aaa; margin-top: 5px; }
-        .warn-text { color: var(--red); font-size: 0.75rem; margin-top: 5px; }
+        .host-log { color: var(--orange); font-size: 0.9rem; min-height: 1.2em; }
 
         #game-ui { display: none; width: 100%; height: 100%; position: relative; }
         
@@ -117,18 +114,14 @@
         <div id="intro" class="panel interactive">
             <h1>JOJOLI LINK</h1>
             
-            <div class="status-box">
-                <span>Signaling</span>
-                <div id="led-sig" class="led"></div>
-            </div>
+            <div class="status-box" id="intro-status">Initializing...</div>
             
             <hr style="border-color:#222; width:100%">
             
             <button class="mode-btn" id="btn-create" onclick="app.createRoom()" disabled>HOST GAME</button>
             <button class="mode-btn" id="btn-join" onclick="app.showJoin()" disabled>JOIN GAME</button>
             
-            <div id="intro-log" class="log-text">Initializing...</div>
-            <div class="warn-text">If connection fails, disable VPN or use Hotspot.</div>
+            <div id="intro-log" class="log-text"></div>
         </div>
 
         <!-- Host -->
@@ -136,6 +129,11 @@
             <h1>HOST MODE</h1>
             <p style="font-size:0.8rem; color:#888">Send this code to P2:</p>
             <input type="text" id="my-id" readonly onclick="this.select()">
+            
+            <!-- Host Diagnostic Log -->
+            <div id="host-diag" class="status-box" style="border-color:var(--neon-blue); color:var(--neon-blue)">
+                Waiting for Player 2...
+            </div>
             
             <div id="host-controls" class="hidden">
                 <div style="color:var(--green); margin-bottom:10px;">CONNECTED</div>
@@ -160,7 +158,7 @@
         <div id="game-ui">
             <div class="status-bar">
                 <span>P1 (HOST)</span>
-                <span style="color:#00f3ff">AUTO LINK</span>
+                <span style="color:#00f3ff">LINK ACTIVE</span>
                 <span>P2 (CLIENT)</span>
             </div>
             <div id="controls-layer">
@@ -247,15 +245,12 @@
             }
 
             initPeerJS() {
-                // AUTO CONFIG: Tries Direct, then Relay. No 'relay' policy forced.
                 const peerConfig = {
                     debug: 1,
                     config: {
-                        // Standard STUN
                         iceServers: [
                             { urls: 'stun:stun.l.google.com:19302' },
                             { urls: 'stun:global.stun.twilio.com:3478' },
-                            // TURN (Fallback if Direct fails)
                             { 
                                 urls: 'turn:openrelay.metered.ca:443', 
                                 username: 'openrelayproject', 
@@ -268,13 +263,35 @@
                 this.peer = new Peer(null, peerConfig);
 
                 this.peer.on('open', (id) => {
+                    this.log("Ready", "intro-status");
                     this.log("Ready", "intro-log");
-                    document.getElementById('led-sig').className = 'led on';
                     document.getElementById('btn-create').disabled = false;
                     document.getElementById('btn-join').disabled = false;
                 });
 
-                this.peer.on('connection', (conn) => this.setupConnection(conn));
+                this.peer.on('connection', (conn) => {
+                    // HOST DIAGNOSTIC: Connection Request Received
+                    console.log("Host: Received connection request");
+                    if(this.isHost) {
+                        const diag = document.getElementById('host-diag');
+                        diag.innerText = "Player 2 is connecting...";
+                        diag.style.color = "var(--orange)";
+                        diag.style.borderColor = "var(--orange)";
+                        
+                        // Add listener to see if it opens
+                        conn.on('open', () => {
+                            diag.innerText = "CONNECTED!";
+                            diag.style.color = "var(--green)";
+                            diag.style.borderColor = "var(--green)";
+                        });
+                        
+                        conn.on('close', () => {
+                            diag.innerText = "Disconnected";
+                            diag.style.color = "var(--red)";
+                        });
+                    }
+                    this.setupConnection(conn);
+                });
 
                 this.peer.on('call', (call) => {
                     call.answer();
@@ -322,7 +339,7 @@
                 
                 const conn = this.peer.connect(id, { 
                     reliable: true,
-                    serialization: 'none' // Use binary (more reliable than JSON)
+                    serialization: 'json' // Back to JSON for stability
                 });
                 
                 this.setupConnection(conn);
@@ -331,21 +348,21 @@
             setupConnection(conn) {
                 this.conn = conn;
                 
-                // Long timeout for negotiation
                 const timeout = setTimeout(() => {
                     if(!this.conn.open) {
-                        alert("CONNECTION FAILED.\n\nYour network is blocking WebRTC.\n\nSOLUTIONS:\n1. Turn OFF VPN.\n2. Turn OFF AdBlocker.\n3. Use Mobile Hotspot.");
+                        alert("CONNECTION FAILED.\n\nHost did not acknowledge.\n\nSolution: Host should refresh and try again.");
                         const btn = document.getElementById('btn-connect');
                         if(btn) {
                             btn.disabled = false;
                             btn.innerText = "RETRY";
                         }
-                        this.log("Blocked by Firewall", "join-log");
+                        this.log("Host Failed to Respond", "join-log");
                     }
                 }, 60000);
 
                 conn.on('open', () => {
                     clearTimeout(timeout);
+                    console.log("Connection Opened");
                     this.log("Connected!", "join-log");
                     if(!this.isHost) {
                         this.switchPanel('game-ui');
