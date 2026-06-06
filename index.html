@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jojoli Online - Universal Connect</title>
+    <title>Jojoli Online - Status Monitor</title>
     
-    <!-- Use specific versions with cache buster to ensure fresh load -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js?v=2"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js?v=2"></script>
-    <script src="https://unpkg.com/jsnes@1.2.1/dist/jsnes.min.js?v=2"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js?v=3"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js?v=3"></script>
+    <script src="https://unpkg.com/jsnes@1.2.1/dist/jsnes.min.js?v=3"></script>
     
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 
@@ -19,6 +18,7 @@
             --bg: #050505;
             --glass: rgba(0, 0, 0, 0.95);
             --error: #ff3333;
+            --success: #00ff00;
         }
 
         * { box-sizing: border-box; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -64,9 +64,16 @@
         }
         input:focus { outline: 1px solid var(--neon-blue); }
 
+        .status-dot {
+            display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+            background: #555; margin-right: 5px;
+        }
+        .status-connected { background: var(--success); box-shadow: 0 0 5px var(--success); }
+        .status-error { background: var(--error); box-shadow: 0 0 5px var(--error); }
+
         .log-text { font-size: 0.8rem; min-height: 1.2em; margin-top: 5px; }
         .error-text { color: var(--error); }
-        .success-text { color: #0f0; }
+        .success-text { color: var(--success); }
 
         #game-ui { display: none; width: 100%; height: 100%; position: relative; }
         
@@ -111,7 +118,10 @@
         <!-- Intro Panel -->
         <div id="intro" class="panel interactive">
             <h1>Jojoli Online</h1>
-            <div id="sys-status" class="log-text" style="color:#aaa">Initializing Network Relay...</div>
+            <div id="sys-status" class="log-text" style="color:#aaa">Connecting to Server...</div>
+            <div id="server-status" class="log-text" style="display:none">
+                <span id="server-dot" class="status-dot"></span> <span id="server-text">Offline</span>
+            </div>
             <hr style="border-color:#333; width:100%">
             <button class="mode-btn" id="btn-create" onclick="app.createRoom()" disabled>HOST GAME</button>
             <button class="mode-btn" id="btn-join" onclick="app.showJoin()" disabled>JOIN GAME</button>
@@ -120,10 +130,12 @@
 
         <!-- Host Panel -->
         <div id="create-panel" class="panel interactive hidden">
-            <h1>HOSTING</h1>
-            <p style="font-size:0.8rem; color:#ccc">Copy this code:</p>
+            <h1>HOST ROOM</h1>
+            <div class="log-text">
+                <span id="host-dot" class="status-dot"></span> <span id="host-text">Status</span>
+            </div>
+            <p style="font-size:0.8rem; color:#ccc">Send this ID to Player 2:</p>
             <input type="text" id="my-id" readonly onclick="this.select()" style="color:var(--neon-blue)">
-            <div id="host-status" class="log-text" style="color:#aaa">Waiting for player...</div>
             
             <div id="host-controls" class="hidden">
                 <hr style="border-color:#333">
@@ -137,8 +149,12 @@
         <!-- Join Panel -->
         <div id="join-panel" class="panel interactive hidden">
             <h1>JOIN GAME</h1>
+            <div class="log-text">
+                <span id="join-dot" class="status-dot"></span> <span id="join-text">Ready</span>
+            </div>
             <p>Paste Host Code:</p>
-            <input type="text" id="host-id" placeholder="PASTE CODE HERE">
+            <!-- type="search" adds a clear 'X' button on mobile -->
+            <input type="search" id="host-id" placeholder="PASTE CODE HERE" autocomplete="off">
             <button class="mode-btn" onclick="app.connectToHost()" id="btn-connect-action">CONNECT</button>
             <div id="join-status" class="log-text"></div>
         </div>
@@ -180,27 +196,35 @@
             constructor() {
                 this.isHost = false;
                 this.nes = null;
-                this.conn = null; // Data
-                this.call = null; // Video
+                this.conn = null; 
+                this.call = null; 
                 this.romData = null;
                 this.is3D = false;
 
                 if(typeof Peer === 'undefined' || typeof THREE === 'undefined' || typeof jsnes === 'undefined') {
-                    this.logError("Critical Error: Libraries failed to load. Check internet/adblocker.");
+                    this.updateStatus("Critical Error: Libraries blocked.", true);
                     return;
                 }
 
                 this.initGraphics();
-                this.initPeerJS(); // This now includes TURN servers
+                this.initPeerJS(); 
                 this.bindInputs();
             }
 
-            logError(msg) {
-                console.error(msg);
-                const el = document.getElementById('intro-error');
-                if(el) el.innerText = msg;
-                const status = document.getElementById('sys-status');
-                if(status) status.innerText = "ERROR";
+            updateStatus(msg, isError = false) {
+                // Centralized status updater for debug
+                console.log(`[STATUS] ${msg}`);
+                // We could add a debug console div here if needed
+            }
+
+            // --- Helper to set dot colors ---
+            setDot(id, colorClass, text) {
+                const dot = document.getElementById(id + '-dot');
+                const txt = document.getElementById(id + '-text');
+                if(dot) {
+                    dot.className = 'status-dot ' + colorClass;
+                }
+                if(txt) txt.innerText = text;
             }
 
             initGraphics() {
@@ -226,7 +250,6 @@
 
             loop3D() {
                 requestAnimationFrame(() => this.loop3D());
-                // Client: Draw Video -> Canvas -> Texture
                 if(!this.isHost) {
                     const vid = document.getElementById('remote-video');
                     if(vid.readyState === 4) {
@@ -242,26 +265,17 @@
             }
 
             initPeerJS() {
-                document.getElementById('sys-status').innerText = "Connecting to Relay Server...";
+                const statusEl = document.getElementById('sys-status');
+                statusEl.innerText = "Connecting to Signaling Server...";
 
-                // CONFIGURATION: Using OpenRelay as a free TURN server to bypass Firewalls
+                // Config with TURN (OpenRelay) to bypass NAT
                 const peerConfig = {
-                    debug: 2,
+                    debug: 1, // Reduced logs for performance
                     config: {
                         iceServers: [
                             { urls: 'stun:stun.l.google.com:19302' },
                             { urls: 'stun:global.stun.twilio.com:3478' },
-                            // Free TURN credentials from openrelay project
-                            { 
-                                urls: 'turn:openrelay.metered.ca:443', 
-                                username: 'openrelayproject', 
-                                credential: 'openrelayproject' 
-                            },
-                            { 
-                                urls: 'turn:openrelay.metered.ca:80', 
-                                username: 'openrelayproject', 
-                                credential: 'openrelayproject' 
-                            }
+                            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
                         ]
                     }
                 };
@@ -270,10 +284,29 @@
 
                 this.peer.on('open', (id) => {
                     console.log('My ID:', id);
-                    document.getElementById('sys-status').innerText = "System Ready";
-                    document.getElementById('sys-status').className = "log-text success-text";
+                    statusEl.innerText = "Connected to Server";
+                    statusEl.style.color = "#0f0";
+                    
+                    document.getElementById('server-status').style.display = 'block';
+                    this.setDot('server', 'status-connected', 'Online');
+                    
                     document.getElementById('btn-create').disabled = false;
                     document.getElementById('btn-join').disabled = false;
+                });
+
+                // HOST DISCONNECTION HANDLING
+                this.peer.on('disconnected', () => {
+                    this.updateStatus("Disconnected from Server. Retrying...", true);
+                    if(this.isHost) {
+                        this.setDot('host', 'status-error', 'Disconnected - Refresh!');
+                        alert("WARNING: You lost connection to the server. Your ID is no longer valid. Please refresh the page.");
+                    }
+                    // Try to reconnect (usually requires page reload for PeerJS to work cleanly)
+                    // this.peer.reconnect(); // Can be buggy, better to alert user
+                });
+
+                this.peer.on('close', () => {
+                    this.updateStatus("Connection Closed.", true);
                 });
 
                 this.peer.on('connection', (conn) => {
@@ -281,10 +314,8 @@
                 });
 
                 this.peer.on('call', (call) => {
-                    // Client answers video call
                     call.answer();
                     call.on('stream', (remoteStream) => {
-                        console.log("Video received");
                         const vid = document.getElementById('remote-video');
                         vid.srcObject = remoteStream;
                         vid.play();
@@ -295,21 +326,21 @@
                 this.peer.on('error', (err) => {
                     console.error(err);
                     let msg = "Connection Error";
-                    if(err.type === 'peer-unavailable') msg = "Host ID not found.\nCheck the code or ensure Host is online.";
-                    if(err.type === 'network') msg = "Network blocked.\nDisable VPN or try different Wi-Fi.";
-                    if(err.type === 'disconnected') msg = "Lost connection to server.";
+                    if(err.type === 'peer-unavailable') msg = "Host ID NOT FOUND.\n\n1. Check the ID.\n2. Host might have refreshed.\n3. Host might be offline.";
+                    if(err.type === 'network') msg = "Network Blocked.\nDisable VPN/Firewall.";
+                    if(err.type === 'disconnected') msg = "Connection to server lost.";
                     
                     alert(msg);
                     
-                    // Update UI if in join panel
                     const status = document.getElementById('join-status');
                     if(status) {
                         status.innerText = msg;
                         status.className = "log-text error-text";
                         document.getElementById('btn-connect-action').disabled = false;
                         document.getElementById('btn-connect-action').innerText = "RETRY";
+                        this.setDot('join', 'status-error', 'Failed');
                     } else {
-                        this.logError(msg);
+                        document.getElementById('intro-error').innerText = msg;
                     }
                 });
             }
@@ -318,50 +349,60 @@
                 this.isHost = true;
                 this.switchPanel('create-panel');
                 document.getElementById('my-id').value = this.peer.id;
+                this.setDot('host', 'status-connected', 'Online');
             }
 
             showJoin() {
                 this.switchPanel('join-panel');
+                this.setDot('join', 'status-connected', 'Ready');
             }
 
             connectToHost() {
-                const hostId = document.getElementById('host-id').value.trim();
+                let hostId = document.getElementById('host-id').value.trim();
+                
+                // Remove any spaces that might have been pasted
+                hostId = hostId.replace(/\s/g, '');
+
                 if(!hostId) {
-                    alert("Please enter a code");
+                    alert("Please enter the Host ID");
                     return;
                 }
                 
                 const status = document.getElementById('join-status');
                 const btn = document.getElementById('btn-connect-action');
                 
-                status.innerText = "Connecting (This may take 10s)...";
+                status.innerText = "Attempting connection...";
                 status.className = "log-text";
                 btn.disabled = true;
                 btn.innerText = "CONNECTING...";
+                this.setDot('join', 'status-connected', 'Connecting...');
 
-                // Connect Data Channel
                 const conn = this.peer.connect(hostId, { reliable: true });
-                this.setupConnection(conn);
+                
+                // 10 Second Timeout
+                const timeout = setTimeout(() => {
+                    if(!this.conn || !this.conn.open) {
+                        alert("Connection Timeout.\n\nIf the Host ID is correct, the Host might be behind a strict firewall.");
+                        btn.disabled = false;
+                        btn.innerText = "RETRY";
+                        status.innerText = "Timed Out";
+                        status.className = "log-text error-text";
+                        this.setDot('join', 'status-error', 'Timeout');
+                        conn.close();
+                    }
+                }, 10000);
+
+                this.setupConnection(conn, timeout);
             }
 
-            setupConnection(conn) {
+            setupConnection(conn, timeoutRef = null) {
                 this.conn = conn;
                 
-                // Timeout handling
-                const timeout = setTimeout(() => {
-                    if(!this.conn.open) {
-                        alert("Connection Timeout. \n\nIf this fails, you might be behind a strict firewall.");
-                        document.getElementById('btn-connect-action').disabled = false;
-                        document.getElementById('btn-connect-action').innerText = "RETRY";
-                    }
-                }, 15000);
-
                 conn.on('open', () => {
-                    clearTimeout(timeout);
+                    if(timeoutRef) clearTimeout(timeoutRef);
                     console.log("Data Connection Open");
                     if(this.isHost) {
-                        document.getElementById('host-status').innerText = "Connected!";
-                        document.getElementById('host-status').className = "log-text success-text";
+                        document.getElementById('host-text').innerText = "Player Connected";
                         document.getElementById('host-controls').classList.remove('hidden');
                     } else {
                         this.switchPanel('game-ui');
@@ -373,28 +414,25 @@
                 conn.on('data', (data) => this.handleData(data));
 
                 conn.on('close', () => {
-                    alert("Disconnected");
+                    alert("Opponent Disconnected");
                     location.reload();
                 });
             }
 
             handleData(data) {
                 if(this.isHost) {
-                    if(data.t === 'I') { // Input
+                    if(data.t === 'I') { 
                         if(this.nes) {
                             if(data.d) this.nes.buttonDown(2, data.b);
                             else this.nes.buttonUp(2, data.b);
                         }
                     }
-                } 
-                else {
-                    if(data.t === 'R') { // ROM
+                } else {
+                    if(data.t === 'R') { 
                         this.loadRomFromBase64(data.d);
                     }
                 }
             }
-
-            // --- ROM & EMULATION ---
 
             fileSelected(inp) {
                 const f = inp.files[0];
@@ -406,7 +444,6 @@
                     let binary = '';
                     for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
                     const base64 = window.btoa(binary);
-                    
                     this.romData = base64;
                     this.loadRomFromBase64(base64);
                     this.send({ t: 'R', d: base64 });
@@ -421,7 +458,7 @@
                     for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
                     this.startGame(bytes);
                 } catch(e) {
-                    alert("Error loading ROM.");
+                    alert("Error loading ROM");
                 }
             }
 
@@ -447,18 +484,15 @@
 
                 try {
                     this.nes.loadROM(romUint8Array);
-                    
                     if(this.isHost) {
                         const stream = cvs.captureStream(30);
                         if(this.conn && this.conn.open) {
                             this.call = this.peer.call(this.conn.peer, stream);
                         }
                     }
-                    
                     this.loop();
                 } catch(e) {
-                    alert("ROM invalid");
-                    console.error(e);
+                    alert("Invalid ROM");
                 }
             }
 
@@ -497,12 +531,10 @@
                 let btn = null, pl = 1;
                 let k = key.toLowerCase();
                 
-                // P1
                 if(k==='arrowup') btn=C.U; if(k==='arrowdown') btn=C.D;
                 if(k==='arrowleft') btn=C.L; if(k==='arrowright') btn=C.R;
                 if(k==='z') btn=C.A; if(k==='x') btn=C.B;
                 
-                // P2
                 if(!btn) {
                     pl=2;
                     if(k==='w') btn=C.U; if(k==='s') btn=C.D;
