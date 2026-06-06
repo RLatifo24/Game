@@ -87,20 +87,23 @@
         .d-btn {
             background: rgba(255,255,255,0.1); border: 1px solid #555;
             display: flex; justify-content: center; align-items: center; font-size: 1.2rem;
+            cursor: pointer;
         }
-        .d-btn:active { background: var(--neon-blue); }
+        .d-btn:active, .d-btn.active { background: var(--neon-blue); color: #000; }
         .ab-btns { display: flex; gap: 20px; }
         .ab-btn {
             width: 60px; height: 60px; border-radius: 50%;
             background: var(--neon-pink); border: 2px solid white;
             display: flex; justify-content: center; align-items: center;
-            font-weight: bold; font-size: 1.2rem;
+            font-weight: bold; font-size: 1.2rem; cursor: pointer;
         }
-        .ab-btn:active { transform: scale(0.9); }
+        .ab-btn:active, .ab-btn.active { transform: scale(0.9); background: #ff99ff; }
 
         /* 2D Mode */
         body.mode-2d #world { display: none; }
         body.mode-2d #screen-container { display: flex; width: 90vw; height: 67.5vw; max-width: 800px; max-height: 600px; }
+        
+        .loading-text { color: yellow; font-size: 0.8rem; margin-top: 5px; min-height: 1.2em; }
     </style>
 </head>
 <body>
@@ -126,9 +129,10 @@
             <div id="conn-status" style="color:#aaa;">Waiting for connection...</div>
             <div id="host-controls" class="hidden">
                 <hr style="border-color:#333">
-                <p>1. UPLOAD ROM</p>
+                <p>1. UPLOAD ROM (.nes)</p>
                 <input type="file" id="rom-file" accept=".nes" style="display:none" onchange="app.fileSelected(this)">
                 <button class="mode-btn" onclick="document.getElementById('rom-file').click()">SELECT FILE</button>
+                <div id="rom-status" class="loading-text"></div>
             </div>
         </div>
 
@@ -138,6 +142,7 @@
             <p>Paste Host ID:</p>
             <input type="text" id="host-id" placeholder="Paste ID Here...">
             <button class="mode-btn" onclick="app.connectToHost()">CONNECT</button>
+            <div id="rom-status" class="loading-text"></div>
         </div>
 
         <!-- Game UI -->
@@ -162,7 +167,7 @@
                     </div>
                 </div>
             </div>
-            <div style="position:absolute; bottom:110px; width:100%; text-align:center; color:#666;">
+            <div style="position:absolute; bottom:110px; width:100%; text-align:center; color:#666; pointer-events: none;">
                 P1: Arrows+ZX | P2: WASD+FG
             </div>
         </div>
@@ -177,6 +182,8 @@
                 this.nes = null;
                 this.conn = null;
                 this.romData = null;
+                this.screenBuffer = null;
+                this.isRunning = false;
 
                 // 1. CHECK PEERJS
                 if(typeof Peer === 'undefined') {
@@ -210,6 +217,7 @@
                     document.getElementById('world').appendChild(this.ren.domElement);
                     this.tex = new THREE.CanvasTexture(cvs);
                     this.tex.minFilter = THREE.NearestFilter;
+                    this.tex.magFilter = THREE.NearestFilter;
                     this.sc.add(new THREE.Mesh(new THREE.PlaneGeometry(3.5, 2.6), new THREE.MeshBasicMaterial({ map: this.tex })));
                     this.sc.add(new THREE.AmbientLight(1));
                     this.loop3D();
@@ -263,7 +271,10 @@
 
             connectToHost() {
                 const hostId = document.getElementById('host-id').value.trim();
-                if(!hostId) return;
+                if(!hostId) {
+                    alert("Please enter a Host ID");
+                    return;
+                }
                 
                 const conn = this.peer.connect(hostId);
                 this.setupConnection(conn);
@@ -280,10 +291,10 @@
                         document.getElementById('host-controls').classList.remove('hidden');
                         document.getElementById('p2-stat').style.color = "#0f0";
                     } else {
-                        alert("Connected to Host! Waiting for ROM...");
                         document.getElementById('join-panel').classList.add('hidden');
                         document.getElementById('game-ui').style.display = 'block';
                         document.getElementById('p1-stat').innerText = "P1 (HOST)";
+                        document.getElementById('rom-status').innerText = "Waiting for host to upload ROM...";
                     }
                 });
 
@@ -292,8 +303,10 @@
                 });
 
                 this.conn.on('close', () => {
-                    alert("Opponent Disconnected");
-                    location.reload();
+                    if(this.isRunning) {
+                        alert("Opponent Disconnected");
+                        location.reload();
+                    }
                 });
             }
 
@@ -304,22 +317,28 @@
             }
 
             handleData(data) {
-                // Host Receives
+                // Host Receives Input
                 if(this.isHost) {
-                    if(data.t === 'I' && this.nes) { // Input
-                        if(data.d) this.nes.buttonDown(2, data.b);
-                        else this.nes.buttonUp(2, data.b);
+                    if(data.t === 'I') { // Input
+                        if(this.nes) {
+                            if(data.d) this.nes.buttonDown(2, data.b);
+                            else this.nes.buttonUp(2, data.b);
+                        }
                     }
                 } 
-                // Client Receives
+                // Client Receives Data
                 else {
                     if(data.t === 'R') { // ROM
+                        document.getElementById('rom-status').innerText = "ROM Received. Starting...";
                         this.startGame(data.d);
                     }
-                    if(data.t === 'V') { // Video
-                        const c = document.getElementById('nes-canvas').getContext('2d');
-                        c.drawImage(data.b, 0, 0);
-                        if(this.is3D && this.tex) this.tex.needsUpdate = true;
+                    if(data.t === 'V') { // Video Frame
+                        if(this.screenBuffer) {
+                            // data.b is an ImageBitmap
+                            const ctx = document.getElementById('nes-canvas').getContext('2d');
+                            ctx.drawImage(data.b, 0, 0);
+                            if(this.is3D && this.tex) this.tex.needsUpdate = true;
+                        }
                     }
                 }
             }
@@ -327,51 +346,100 @@
             fileSelected(inp) {
                 const f = inp.files[0];
                 if(!f) return;
+                
+                document.getElementById('rom-status').innerText = "Reading file...";
+                
                 const r = new FileReader();
                 r.onload = e => {
                     this.romData = e.target.result;
+                    document.getElementById('rom-status').innerText = "File read. Starting engine...";
                     this.startGame(this.romData);
                     this.send({ t: 'R', d: this.romData });
+                };
+                r.onerror = () => {
+                    alert("Error reading file.");
+                    document.getElementById('rom-status').innerText = "Error reading file.";
                 };
                 r.readAsArrayBuffer(f);
             }
 
             startGame(romData) {
-                document.getElementById('create-panel').classList.add('hidden');
-                document.getElementById('game-ui').style.display = 'block';
+                try {
+                    if(this.isRunning) return; // Prevent double start
 
-                const cvs = document.getElementById('nes-canvas');
-                const ctx = cvs.getContext('2d');
-                const img = ctx.createImageData(256,240);
+                    // --- CRITICAL FIX ---
+                    // jsNES requires a Uint8Array. FileReader and PeerJS provide ArrayBuffer.
+                    // We must convert it here.
+                    let romArray = romData;
+                    if (romData instanceof ArrayBuffer) {
+                        romArray = new Uint8Array(romData);
+                    } else if (romData instanceof Uint8Array) {
+                        // pass through
+                    } else {
+                        throw new Error("Invalid ROM data format received.");
+                    }
+                    // ---------------------
 
-                this.nes = new jsnes.NES({
-                    onFrame: buf => {
-                        const d = img.data;
-                        for(let i=0;i<buf.length;i++) {
-                            const c = buf[i];
-                            d[i*4]=c&0xFF; d[i*4+1]=(c>>8)&0xFF; d[i*4+2]=(c>>16)&0xFF; d[i*4+3]=0xFF;
-                        }
-                        ctx.putImageData(img,0,0);
-                        
-                        if(this.is3D && this.tex) {
-                            this.tex.needsUpdate = true;
-                        }
+                    // Hide panels, show game
+                    if(this.isHost) document.getElementById('create-panel').classList.add('hidden');
+                    document.getElementById('game-ui').style.display = 'block';
 
-                        // Stream to P2 if Host
-                        if(this.isHost) {
-                            createImageBitmap(cvs).then(bmp => {
-                                this.send({ t: 'V', b: bmp });
-                            });
-                        }
-                    },
-                    onAudioSample: ()=>{}
-                });
-                this.nes.loadROM(romData);
-                this.loop();
+                    const cvs = document.getElementById('nes-canvas');
+                    const ctx = cvs.getContext('2d');
+                    this.screenBuffer = ctx.createImageData(256,240);
+
+                    // Initialize jsNES
+                    if(typeof jsnes === 'undefined') {
+                        throw new Error("jsNES library not loaded.");
+                    }
+
+                    this.nes = new jsnes.NES({
+                        onFrame: buf => {
+                            // buf is a 32-bit integer array (RGBA)
+                            const d = this.screenBuffer.data;
+                            // Fast copy
+                            // jsNES provides a standard 32bit buffer usually, but we need 8bit for putImageData
+                            // The default jsNES onFrame usually gives a 256*240 array of 32bit colors
+                            for(let i=0; i<buf.length; i++) {
+                                const val = buf[i];
+                                d[i*4] = val & 0xFF;         // R
+                                d[i*4+1] = (val>>8) & 0xFF;  // G
+                                d[i*4+2] = (val>>16) & 0xFF; // B
+                                d[i*4+3] = 0xFF;             // A
+                            }
+                            
+                            ctx.putImageData(this.screenBuffer, 0, 0);
+                            
+                            if(this.is3D && this.tex) {
+                                this.tex.needsUpdate = true;
+                            }
+
+                            // Stream to P2 if Host
+                            if(this.isHost && this.conn && this.conn.open) {
+                                // Using createImageBitmap is efficient for transfer
+                                createImageBitmap(cvs).then(bmp => {
+                                    this.send({ t: 'V', b: bmp });
+                                }).catch(e => console.error("Bitmap error", e));
+                            }
+                        },
+                        onAudioSample: ()=>{ /* Muted to prevent browser auto-play issues */ }
+                    });
+
+                    this.nes.loadROM(romArray);
+                    this.isRunning = true;
+                    this.loop();
+
+                } catch (e) {
+                    console.error(e);
+                    alert("Failed to start ROM: " + e.message + "\n\nEnsure you selected a valid .nes file.");
+                    document.getElementById('rom-status').innerText = "Error: " + e.message;
+                    // Reset UI slightly if needed
+                    if(this.isHost) document.getElementById('host-controls').classList.remove('hidden');
+                }
             }
 
             loop() {
-                if(this.nes) {
+                if(this.nes && this.isRunning) {
                     this.nes.frame();
                     requestAnimationFrame(()=>this.loop());
                 }
@@ -385,7 +453,10 @@
                     else this.nes.buttonUp(pl, b);
                 }
                 
-                // Network Send (Only if P2)
+                // Network Send (Only if P2 or if Host sending P2 input - wait, no)
+                // Logic: P2 (Client) sends their inputs to Host
+                // Host (P1) runs emulation and sends video back.
+                
                 if(!this.isHost && pl === 2) {
                     this.send({ t: 'I', b: b, d: d });
                 }
@@ -395,26 +466,24 @@
                 let b=null, pl=1;
                 k=k.toLowerCase();
                 
-                // P1
+                // P1 (Host)
                 if(k==='arrowleft') b=C.L; if(k==='arrowright') b=C.R;
                 if(k==='arrowup') b=C.U; if(k==='arrowdown') b=C.D;
                 if(k==='z') b=C.A; if(k==='x') b=C.B;
                 if(k==='enter') b=C.ST; if(k==='shift') b=C.SEL;
                 
-                // P2
-                if(!b && (this.isHost || !this.isHost)) {
-                    pl=2;
+                // P2 (Client)
+                // Note: If I am Host, I control P1.
+                // If I am Client, I control P2.
+                if(!b) {
+                    // Check if these keys map to P2
                     if(k==='a') b=C.L; if(k==='d') b=C.R;
                     if(k==='w') b=C.U; if(k==='s') b=C.D;
                     if(k==='f') b=C.A; if(k==='g') b=C.B;
                     if(k==='h') b=C.ST; if(k==='j') b=C.SEL;
+                    
+                    if(b) pl = 2;
                 }
                 
                 if(b) this.btn(pl, b, d);
             }
-        }
-
-        const app = new Jojoli();
-    </script>
-</body>
-</html>
