@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jojoli Online - Clean Legacy</title>
+    <title>Jojoli Online - Turbo Connect</title>
     
-    <!-- Using jsdelivr (often more stable than unpkg) -->
     <script src="https://cdn.jsdelivr.net/npm/peerjs@1.3.2/dist/peerjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsnes@1.2.1/dist/jsnes.min.js"></script>
@@ -18,8 +17,8 @@
             --neon-pink: #ff00ff;
             --bg: #050505;
             --glass: rgba(20, 20, 20, 0.98);
-            --red: #ff3333;
             --green: #00ff00;
+            --orange: #ffaa00;
         }
 
         * { box-sizing: border-box; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -56,11 +55,11 @@
             padding: 12px; font-family: 'Orbitron'; font-size: 1rem; cursor: pointer;
             transition: 0.2s; text-transform: uppercase; letter-spacing: 1px;
         }
-        .mode-btn:hover { background: var(--neon-blue); color: black; box-shadow: 0 0 10px var(--neon-blue); }
+        .mode-btn:hover { background: var(--neon-blue); color: black; }
         .mode-btn:disabled { border-color: #333; color: #333; cursor: not-allowed; }
         
         .test-btn {
-            background: #333; border: 1px solid #555; color: #aaa;
+            background: #222; border: 1px solid #444; color: #888;
             padding: 8px; font-family: monospace; font-size: 0.8rem; cursor: pointer; margin-top: 5px;
         }
         
@@ -69,13 +68,14 @@
             color: white; font-family: monospace; text-align: center; font-size: 1.1rem; letter-spacing: 2px;
         }
 
-        /* Status Indicators */
         .status-row { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 0.9rem; margin-bottom: 5px; }
         .led { width: 12px; height: 12px; border-radius: 50%; background: #333; box-shadow: inset 0 0 5px #000; }
         .led.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
-        .led.off { background: var(--red); box-shadow: 0 0 8px var(--red); }
+        .led.busy { background: var(--orange); box-shadow: 0 0 8px var(--orange); animation: blink 1s infinite; }
         
-        .log-text { font-size: 0.8rem; min-height: 1.2em; color: #aaa; margin-top: 5px; }
+        @keyframes blink { 50% { opacity: 0.5; } }
+
+        .log-text { font-size: 0.85rem; min-height: 1.2em; color: #aaa; margin-top: 5px; word-wrap: break-word; }
 
         #game-ui { display: none; width: 100%; height: 100%; position: relative; }
         
@@ -144,6 +144,9 @@
             <p style="font-size:0.8rem; color:#888">Send this code to P2:</p>
             <input type="text" id="my-id" readonly onclick="this.select()">
             
+            <!-- New: Host connection log -->
+            <div id="host-activity" class="log-text" style="color: var(--orange); display:none;">Waiting for player...</div>
+            
             <div id="host-controls" class="hidden">
                 <div style="color:var(--green); margin-bottom:10px;">P2 CONNECTED</div>
                 <p>Load ROM (.nes):</p>
@@ -164,7 +167,7 @@
             
             <button class="mode-btn" onclick="app.connectToHost()" id="btn-connect">CONNECT</button>
             
-            <button class="test-btn" onclick="app.testNetwork()">TEST NETWORK FIRST</button>
+            <button class="test-btn" onclick="app.testNetwork()">TEST SIGNALING</button>
             <div id="join-log" class="log-text"></div>
         </div>
 
@@ -228,7 +231,7 @@
             setLed(id, state) {
                 const el = document.getElementById(id);
                 if(!el) return;
-                el.className = 'led ' + (state ? 'on' : 'off');
+                el.className = 'led ' + (state === 'on' ? 'on' : (state === 'busy' ? 'busy' : ''));
             }
 
             initGraphics() {
@@ -269,29 +272,65 @@
             initPeerJS() {
                 this.log("Connecting to Cloud...", "server-text");
                 
-                // Standard Config (No TURN to reduce blocking)
-                this.peer = new Peer(null, {
-                    debug: 1
-                });
+                // TURBO CONFIG: Includes STUN and TURN (OpenRelay)
+                // This forces a relay path if direct connection fails.
+                const peerConfig = {
+                    debug: 1,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:global.stun.twilio.com:3478' },
+                            // TURN Server (Relay)
+                            { 
+                                urls: 'turn:openrelay.metered.ca:443', 
+                                username: 'openrelayproject', 
+                                credential: 'openrelayproject' 
+                            },
+                            { 
+                                urls: 'turn:openrelay.metered.ca:80', 
+                                username: 'openrelayproject', 
+                                credential: 'openrelayproject' 
+                            }
+                        ]
+                    }
+                };
+
+                this.peer = new Peer(null, peerConfig);
 
                 this.peer.on('open', (id) => {
                     this.log("Cloud Connected", "server-text");
-                    this.setLed('server-led', true);
+                    this.setLed('server-led', 'on');
                     document.getElementById('btn-create').disabled = false;
                     document.getElementById('btn-join').disabled = false;
                 });
 
                 this.peer.on('disconnected', () => {
                     this.log("Lost Connection", "server-text");
-                    this.setLed('server-led', false);
+                    this.setLed('server-led', '');
                     if(this.isHost) {
-                        this.setLed('host-led', false);
-                        document.getElementById('host-text').innerText = "DISCONNECTED";
-                        alert("You lost connection to the server. Refresh to get a new ID.");
+                        alert("You lost connection to the server. Refresh.");
                     }
                 });
 
-                this.peer.on('connection', (conn) => this.setupConnection(conn));
+                this.peer.on('connection', (conn) => {
+                    // Host Side: Incoming Connection
+                    const act = document.getElementById('host-activity');
+                    act.style.display = 'block';
+                    act.innerText = "Client connecting... (Waiting for ICE)";
+                    this.setLed('host-led', 'busy');
+                    
+                    conn.on('open', () => {
+                        act.innerText = "Connected!";
+                        act.style.color = "#0f0";
+                        this.setLed('host-led', 'on');
+                        this.setupConnection(conn);
+                    });
+                    
+                    conn.on('close', () => {
+                        act.innerText = "Client disconnected.";
+                        this.setLed('host-led', '');
+                    });
+                });
 
                 this.peer.on('call', (call) => {
                     call.answer();
@@ -305,15 +344,15 @@
 
                 this.peer.on('error', (err) => {
                     console.error(err);
-                    if(err.type === 'peer-unavailable') {
-                        alert("ERROR: Host ID not found.\n\n1. Check the code.\n2. Make sure Host hasn't refreshed.");
-                    } else if (err.type === 'network') {
-                        alert("ERROR: Network blocked.\nTurn off VPN or try a different network.");
-                    }
                     const btn = document.getElementById('btn-connect');
                     if(btn) {
                         btn.disabled = false;
                         btn.innerText = "RETRY";
+                    }
+                    if(err.type === 'peer-unavailable') {
+                        alert("Host ID not found.");
+                    } else if (err.type === 'network') {
+                        alert("Network Error.");
                     }
                 });
             }
@@ -322,7 +361,7 @@
                 this.isHost = true;
                 this.switchPanel('create-panel');
                 document.getElementById('my-id').value = this.peer.id;
-                this.setLed('host-led', true);
+                this.setLed('host-led', 'on');
                 document.getElementById('host-text').innerText = "Hosting";
             }
 
@@ -333,30 +372,16 @@
             testNetwork() {
                 const log = document.getElementById('join-log');
                 log.innerText = "Testing...";
-                
-                // Try to connect to a fake ID to check if we can reach the server
                 const testConn = this.peer.connect("test-fake-id-999");
-                
-                let passed = false;
-                testConn.on('open', () => { passed = true; }); // Shouldn't happen
-                
-                // Timeout check
                 setTimeout(() => {
-                    if(passed) return;
-                    // If we get 'peer-unavailable' error shortly after, it means we reached the server!
                     log.innerText = "Network OK (Server Reachable)";
                     log.style.color = "#0f0";
-                    // Clean up
                     testConn.close();
                 }, 2000);
-                
                 testConn.on('error', (e) => {
                     if(e.type === 'peer-unavailable') {
                         log.innerText = "Network OK (Server Reachable)";
                         log.style.color = "#0f0";
-                    } else {
-                        log.innerText = "Network Error (Cannot reach Server)";
-                        log.style.color = "red";
                     }
                 });
             }
@@ -367,27 +392,37 @@
                 
                 const btn = document.getElementById('btn-connect');
                 btn.disabled = true;
-                btn.innerText = "CONNECTING...";
+                btn.innerText = "CONNECTING (30s)...";
+                this.log("Handshaking...", "join-log");
                 
-                const conn = this.peer.connect(id, { reliable: true });
+                const conn = this.peer.connect(id, { 
+                    reliable: true,
+                    serialization: 'json' // Sometimes helps with strict NATs
+                });
+                
                 this.setupConnection(conn);
             }
 
             setupConnection(conn) {
                 this.conn = conn;
+                
+                // Client Side: Wait for Open
                 const timeout = setTimeout(() => {
                     if(!this.conn.open) {
-                        alert("Connection Timeout.");
-                        document.getElementById('btn-connect').disabled = false;
-                        document.getElementById('btn-connect').innerText = "RETRY";
+                        alert("Connection Timeout.\n\nThis usually means your firewalls are blocking the tunnel.\nTry turning off VPNs or using Mobile Data instead of Wi-Fi.");
+                        const btn = document.getElementById('btn-connect');
+                        if(btn) {
+                            btn.disabled = false;
+                            btn.innerText = "RETRY";
+                        }
+                        this.log("Timed Out", "join-log");
                     }
-                }, 10000);
+                }, 30000); // 30 Seconds
 
                 conn.on('open', () => {
                     clearTimeout(timeout);
-                    if(this.isHost) {
-                        document.getElementById('host-controls').classList.remove('hidden');
-                    } else {
+                    this.log("Connected!", "join-log");
+                    if(!this.isHost) {
                         this.switchPanel('game-ui');
                     }
                 });
@@ -403,6 +438,14 @@
                 conn.on('close', () => {
                     alert("Disconnected");
                     location.reload();
+                });
+                
+                // Debug ICE state
+                conn.on('iceStateChange', (state) => {
+                    console.log("ICE State:", state);
+                    if(state === 'disconnected') {
+                        // Reconnect logic could go here
+                    }
                 });
             }
 
