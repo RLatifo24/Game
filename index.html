@@ -3618,26 +3618,22 @@
 
     /* =========================================================
        KEYBOARD INPUT
-       P1 = W A S D + N/M
-       P2 = ARROWS + X/C
-       Start/Select are different too so the two players never
-       steal each other's movement buttons.
+       OWNER / PLAYER 1 = ARROWS + X/C
+       JOINED PLAYER / PLAYER 2 = I/J/K/L + E/R
+       E = A, R = B
+       Both players use the same START/SELECT keys.
     ========================================================= */
     function keyToButton(key){
         const k = String(key).toLowerCase();
 
         if(localPlayer === 1){
-            switch(k){
-                case "w": return "up";
-                case "s": return "down";
-                case "a": return "left";
-                case "d": return "right";
-                case "n": return "x";
-                case "m": return "c";
-                case "q": return "select";
-                case "e": return "start";
-            }
-        }else{
+            /* OWNER / PLAYER 1:
+               Arrow keys = D-pad
+               X = A
+               C = B
+               Enter = Start
+               Shift = Select
+            */
             switch(k){
                 case "arrowup": return "up";
                 case "arrowdown": return "down";
@@ -3645,6 +3641,27 @@
                 case "arrowright": return "right";
                 case "x": return "x";
                 case "c": return "c";
+                case "shift": return "select";
+                case "enter": return "start";
+            }
+        }else{
+            /* JOINED PLAYER / PLAYER 2:
+               I = Up
+               K = Down
+               J = Left
+               L = Right
+               E = A
+               R = B
+               Enter = Start
+               Shift = Select
+            */
+            switch(k){
+                case "i": return "up";
+                case "k": return "down";
+                case "j": return "left";
+                case "l": return "right";
+                case "e": return "x";
+                case "r": return "c";
                 case "shift": return "select";
                 case "enter": return "start";
             }
