@@ -1,3 +1,4 @@
+```
 
 <!DOCTYPE html>
 <html lang="en">
@@ -351,7 +352,7 @@
             display:flex;
             align-items:center;
             justify-content:center;
-            background:#000;
+            background:#000 !important;
             padding:0;
             overflow:hidden;
         }
@@ -366,6 +367,10 @@
             object-fit:contain;
             background:#000;
             border:0;
+            opacity:1 !important;
+            visibility:visible !important;
+            box-shadow:0 0 36px rgba(255,255,255,.16);
+            filter:brightness(2.20) saturate(1.10) contrast(1.10) opacity(1);
             image-rendering:pixelated;
             image-rendering:crisp-edges;
             image-rendering:-moz-crisp-edges;
@@ -575,6 +580,30 @@
         }
 
         /* CHAT */
+
+        .guest-controls{
+            display:none;
+            padding:12px;
+            border:1px solid var(--border);
+            background:rgba(16,16,26,.96);
+            box-shadow:0 0 20px rgba(0,255,213,.06);
+        }
+
+        .guest-controls .title{
+            margin-bottom:8px;
+            color:var(--cyan);
+        }
+
+        .guest-status{
+            margin:0 0 10px;
+            color:var(--muted);
+            font-size:10px;
+            line-height:1.5;
+        }
+
+        #guestLoadButton{
+            width:100%;
+        }
 
         .chat{
             flex:1;
@@ -880,7 +909,7 @@
             <div class="game-header">
 
                 <div class="game-title">
-                    NES // SHARED SCREEN
+                    NES // SYNCHRONIZED LOCAL GAME
                 </div>
 
                 <div
@@ -1037,6 +1066,18 @@
 
             </div>
 
+            <!-- PLAYER 2 GAME LOADER -->
+            <div id="guestControls" class="guest-controls">
+                <div class="title">PLAYER 2</div>
+                <div id="guestLoadStatus" class="guest-status">
+
+                </div>
+                <button id="guestLoadButton" class="btn yellow" disabled style="display:none">
+                    LOAD GAME FROM MY DEVICE
+                </button>
+                <input id="guestRomInput" type="file" accept=".nes,application/octet-stream" style="display:none">
+            </div>
+
 
             <!-- CHAT -->
 
@@ -1112,6 +1153,10 @@
     const p2Status = $("p2Status");
 
     const ownerControls = $("ownerControls");
+    const guestControls = $("guestControls");
+    const guestLoadButton = $("guestLoadButton");
+    const guestLoadStatus = $("guestLoadStatus");
+    const guestRomInput = $("guestRomInput");
 
     const romInput = $("romInput");
     const romName = $("romName");
@@ -1154,6 +1199,8 @@
 
     let romBytes = null;
     let romLoaded = false;
+    let romInfo = null;
+    let localRomHash = "";
 
     let nes = null;
     let gameRunning = false;
@@ -1163,8 +1210,15 @@
     let localPlayer = 1;
     let remotePlayer = 2;
     let player2Ready = false;
+    let player2RomInfo = null;
+    let romReceived = false;
 
     let frameTimer = null;
+    let emuFrameNumber = 0;
+    let lastSyncSentFrame = 0;
+    let authoritativeTargetFrame = 0;
+    let synchronizedStartTimer = null;
+    let syncStartToken = 0;
 
     let reconnectTimer = null;
 
@@ -1192,6 +1246,54 @@
     */
 
     const localKeys = {};
+
+    /* =========================================================
+       DETERMINISTIC ONLINE LOCKSTEP
+       The host is the single frame authority. Both browsers run
+       the same ROM locally, but P2 never advances a frame by its
+       own wall-clock timer. P1 sends the exact controller state
+       used for every frame, so both screens execute the same input
+       sequence in the same frame order.
+    ========================================================= */
+    const syncButtons = ["up","down","left","right","x","c","start","select"];
+    const controllerState = {1:{},2:{}};
+    const appliedControllerState = {1:{},2:{}};
+    syncButtons.forEach(b=>{
+        controllerState[1][b]=false;
+        controllerState[2][b]=false;
+        appliedControllerState[1][b]=false;
+        appliedControllerState[2][b]=false;
+    });
+    let syncFrameQueue = [];
+    let syncLastReceivedFrame = 0;
+    let syncLastAppliedFrame = 0;
+
+    function setControllerState(player, button, pressed){
+        if(!controllerState[player]) return;
+        controllerState[player][button] = !!pressed;
+    }
+
+    function reconcileController(player, desired){
+        if(!nes || !desired) return;
+        for(const button of syncButtons){
+            const want = !!desired[button];
+            const had = !!appliedControllerState[player][button];
+            if(want === had) continue;
+            applyInput(button, want, player);
+            appliedControllerState[player][button] = want;
+        }
+    }
+
+    function resetSyncState(){
+        for(const p of [1,2]){
+            for(const b of syncButtons){
+                appliedControllerState[p][b]=false;
+            }
+        }
+        syncFrameQueue=[];
+        syncLastReceivedFrame=0;
+        syncLastAppliedFrame=0;
+    }
 
 
     /*
@@ -1523,12 +1625,16 @@
 
         romLoaded =
             false;
+        romInfo = null;
+        localRomHash = "";
 
         gameRunning =
             false;
 
         gamePaused =
             false;
+        romReceived = false;
+        player2Ready = false;
 
 
         topRoomCode.textContent =
@@ -1748,6 +1854,8 @@
 
         romLoaded =
             false;
+        romInfo = null;
+        localRomHash = "";
 
         gameRunning =
             false;
@@ -2079,7 +2187,7 @@
 
                     player2Ready = false;
                     p2Status.textContent =
-                        "READY";
+                        "CONNECTED — WAITING LOAD";
 
                     p2Status.classList.add(
                         "ready"
@@ -2109,7 +2217,7 @@
 
                         setTimeout(
                             ()=>{
-                                sendRomReliable();
+                                sendRomInfo();
                             },
                             500
                         );
@@ -2119,7 +2227,7 @@
                 }else{
 
                     p2Status.textContent =
-                        "READY";
+                        "CONNECTED";
 
                     p2Status.classList.add(
                         "ready"
@@ -2318,6 +2426,48 @@
                 break;
 
 
+            case "rom-info":
+
+                if(!isOwner){
+                    romInfo={name:data.name||"NES GAME",size:Number(data.size)||0,hash:data.hash||""};
+                    /* Do not erase a ROM already selected by P2. */
+                    if(!romLoaded) player2Ready=false;
+                    guestControls.style.display="block";
+                    guestLoadButton.style.display="inline-block";
+                    guestLoadButton.disabled=false;
+                    guestLoadStatus.textContent="OWNER LOADED: " + romInfo.name + "\nLOAD THE SAME GAME FROM YOUR DEVICE";
+                    guestLoadStatus.style.whiteSpace="pre-line";
+                    p2Status.textContent="CONNECTED — LOAD GAME";
+                    setProgress(0,"WAITING FOR PLAYER 2 TO LOAD");
+                    overlay("LOAD THE SAME GAME<br><br>FROM YOUR DEVICE");
+                    showNotification("LOAD GAME FROM YOUR DEVICE");
+                    addMessage("SYSTEM","OWNER LOADED " + romInfo.name + " — LOAD THE SAME GAME FROM YOUR DEVICE",true);
+                    updateButtons();
+                }
+                break;
+
+            case "p2-rom-ready":
+                if(isOwner){
+                    player2RomInfo = {name:data.name||"NES GAME", size:Number(data.size)||0, hash:data.hash||""};
+                    if(romLoaded && localRomHash && data.hash === localRomHash && Number(data.size) === romBytes.length){
+                        player2Ready = true;
+                        p2Status.textContent = "GAME LOADED";
+                        p2Status.classList.add("ready");
+                        overlay("GAME LOADED TO BOTH PLAYERS<br><br>OWNER CAN START");
+                        showNotification("PLAYER 2 LOADED THE SAME GAME — PRESS START");
+                        addMessage("SYSTEM","PLAYER 2 LOADED THE SAME GAME — OWNER CAN START",true);
+                        sendData({type:"rom-ready",hash:data.hash});
+                    }else if(romLoaded){
+                        player2Ready = false;
+                        showNotification("PLAYER 2 LOADED A DIFFERENT ROM");
+                        toast("PLAYER 2 MUST LOAD THE SAME ROM");
+                    }else{
+                        showNotification("PLAYER 2 LOADED THE GAME — NOW LOAD YOUR ROM");
+                    }
+                    updateButtons();
+                }
+                break;
+
             case "rom-ready":
 
                 handleRomReady(data);
@@ -2330,9 +2480,13 @@
             case "game-start":
 
                 if(!isOwner){
-
-                    startLocalGame();
-
+                    /*
+                       Both browsers start their OWN JSNES instance.
+                       The owner sends a small countdown instead of a
+                       screenshot/ROM stream, so P2 starts at the same
+                       logical moment as P1.
+                    */
+                    scheduleSynchronizedStart(Number(data.delay) || 1200, data.token || "");
                 }
 
                 break;
@@ -2362,16 +2516,28 @@
                 break;
 
 
-            /* INPUT */
+            /* DETERMINISTIC INPUT / FRAME SYNC */
 
-            case "input":
-                if(isOwner){
-                    applyInput(data.button,data.pressed,remotePlayer);
+            case "input-state":
+                if(isOwner && Number(data.player) === 2){
+                    controllerState[2] = {...controllerState[2], ...(data.state||{})};
                 }
                 break;
 
-            case "screen-frame":
-                pendingScreenFrame=true;
+            case "sync-frame":
+                applyAuthoritativeFrame(data);
+                break;
+
+            /* Legacy packets from older rooms. */
+            case "input":
+                if(isOwner && Number(data.player || 2) === 2){
+                    setControllerState(2,data.button,!!data.pressed);
+                }
+                break;
+
+            case "input-relay":
+            case "host-input":
+            case "sync-tick":
                 break;
 
 
@@ -2380,11 +2546,11 @@
             case "chat":
 
                 addMessage(
-                    "P1",
+                    isOwner ? "P2" : "P1",
                     data.text
                 );
 
-                showNotification();
+                showNotification("NEW MESSAGE");
 
                 break;
 
@@ -2392,6 +2558,48 @@
 
     }
 
+
+    /* =========================================================
+       ROM IDENTITY / PLAYER 2 LOCAL LOAD
+    ========================================================= */
+
+    async function sha256Hex(bytes){
+        const digest = await crypto.subtle.digest("SHA-256", bytes);
+        return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,"0")).join("");
+    }
+
+    function isValidNES(bytes){
+        return bytes && bytes.length >= 16 && bytes[0]===0x4E && bytes[1]===0x45 && bytes[2]===0x53 && bytes[3]===0x1A;
+    }
+
+    async function sendRomInfo(){
+        if(!isOwner || !romBytes || !dataConnection || !dataConnection.open) return;
+        if(!localRomHash) localRomHash = await sha256Hex(romBytes);
+        romInfo = {name: romName.textContent.split(" — ")[0] || "NES GAME", size:romBytes.length, hash:localRomHash};
+        sendData({type:"rom-info", ...romInfo});
+
+        /* If P2 loaded first, compare both local ROMs now. */
+        if(player2RomInfo){
+            if(player2RomInfo.hash === localRomHash && Number(player2RomInfo.size) === romBytes.length){
+                player2Ready = true;
+                p2Status.textContent = "GAME LOADED";
+                p2Status.classList.add("ready");
+                guestLoadStatus.textContent = "GAME LOADED — BOTH PLAYERS READY";
+                overlay("GAME LOADED TO BOTH PLAYERS<br><br>OWNER CAN START");
+                showNotification("BOTH PLAYERS LOADED THE GAME — PRESS START");
+                addMessage("SYSTEM","BOTH PLAYERS LOADED THE SAME GAME — OWNER CAN START",true);
+            }else{
+                player2Ready = false;
+                showNotification("ROM MISMATCH — P2 MUST LOAD THE SAME GAME");
+                toast("PLAYER 2 LOADED A DIFFERENT ROM");
+            }
+        }else{
+            p2Status.textContent="CONNECTED — LOAD GAME";
+            guestLoadStatus.textContent="LOAD THE SAME GAME FROM YOUR DEVICE";
+            showNotification("PLAYER 2 CAN LOAD THE GAME FROM THEIR DEVICE");
+        }
+        updateButtons();
+    }
 
     /* =========================================================
        ROM INPUT
@@ -2478,6 +2686,12 @@
 
                 romLoaded =
                     true;
+                romReceived = true;
+                player2Ready = false;
+                /* Re-evaluate P2 if P2 loaded first. */
+                if(player2RomInfo && player2RomInfo.hash === localRomHash && Number(player2RomInfo.size) === romBytes.length){
+                    player2Ready = true;
+                }
 
                 gameRunning =
                     false;
@@ -2493,6 +2707,9 @@
                         romBytes.length
                     );
 
+                localRomHash = await sha256Hex(romBytes);
+                romInfo = {name:file.name, size:romBytes.length, hash:localRomHash};
+
 
                 setProgress(
                     100,
@@ -2503,11 +2720,11 @@
                 updateButtons();
 
 
-                if(connected){
+                        if(connected){
 
                     overlay(
-                        "GAME READY<br><br>" +
-                        "PRESS START"
+                        "ROM LOADED<br><br>" +
+                        "WAITING FOR PLAYER 2 TO LOAD"
                     );
 
                 }else{
@@ -2539,7 +2756,7 @@
                     dataConnection.open
                 ){
 
-                    sendRomReliable();
+                    sendRomInfo();
 
                 }
 
@@ -2792,8 +3009,9 @@
             0
         );
 
-        streamFrameNumber++;
-        streamCurrentFrame();
+        /* The second player renders its own local JSNES frame.
+           We synchronize inputs and frame timing instead of sending
+           compressed screenshots over the network. */
 
     }
 
@@ -2803,60 +3021,86 @@
     ========================================================= */
 
     function startEmulation(){
-
         stopEmulation();
 
+        if(!nes) return;
+
+        /* P2 is not allowed to free-run. It advances only when the
+           authoritative host frame arrives over the reliable data
+           channel. This is what keeps both emulators on the same frame. */
         if(!isOwner) return;
 
-        if(!nes)
-            return;
+        frameTimer = setInterval(()=>{
+            if(!gameRunning || gamePaused || !nes) return;
 
+            try{
+                /* Apply the exact controller state that this frame uses. */
+                reconcileController(1, controllerState[1]);
+                reconcileController(2, controllerState[2]);
 
-        frameTimer =
-            setInterval(
-                ()=>{
+                nes.frame();
+                emuFrameNumber++;
 
-                    if(
-                        gameRunning &&
-                        !gamePaused &&
-                        nes
-                    ){
-
-                        try{
-
-                            nes.frame();
-
-                        }catch(error){
-
-                            console.error(
-                                "NES FRAME:",
-                                error
-                            );
-
-                        }
-
-                    }
-
-                },
-                1000 / 60
-            );
-
+                /* Send the exact input snapshot AFTER the host has
+                   advanced this frame. P2 applies this snapshot and
+                   advances exactly one frame, in the same order. */
+                if(connected && dataConnection && dataConnection.open){
+                    sendData({
+                        type:"sync-frame",
+                        frame:emuFrameNumber,
+                        p1:{...controllerState[1]},
+                        p2:{...controllerState[2]}
+                    });
+                }
+            }catch(error){
+                console.error("NES FRAME:",error);
+            }
+        }, 1000/60);
     }
 
+    function applyAuthoritativeFrame(data){
+        if(isOwner || !gameRunning || gamePaused || !nes) return;
+        const frame = Number(data.frame)||0;
+        if(frame <= syncLastAppliedFrame) return;
+
+        /* Reliable PeerJS preserves order, but keep a tiny queue so
+           temporary browser scheduling/network jitter cannot reorder the
+           local simulation. */
+        syncFrameQueue.push(data);
+        syncFrameQueue.sort((a,b)=>(Number(a.frame)||0)-(Number(b.frame)||0));
+
+        while(syncFrameQueue.length){
+            const next = syncFrameQueue[0];
+            const n = Number(next.frame)||0;
+            if(n <= syncLastAppliedFrame){
+                syncFrameQueue.shift();
+                continue;
+            }
+            if(n !== syncLastAppliedFrame + 1) break;
+
+            syncFrameQueue.shift();
+            controllerState[1] = {...controllerState[1], ...(next.p1||{})};
+            controllerState[2] = {...controllerState[2], ...(next.p2||{})};
+            reconcileController(1, controllerState[1]);
+            reconcileController(2, controllerState[2]);
+
+            try{
+                nes.frame();
+                emuFrameNumber = n;
+                syncLastAppliedFrame = n;
+                syncLastReceivedFrame = n;
+            }catch(error){
+                console.error("P2 SYNC FRAME:",error);
+                break;
+            }
+        }
+    }
 
     function stopEmulation(){
-
         if(frameTimer){
-
-            clearInterval(
-                frameTimer
-            );
-
-            frameTimer =
-                null;
-
+            clearInterval(frameTimer);
+            frameTimer=null;
         }
-
     }
 
 
@@ -2886,6 +3130,65 @@
         unlockAudio();
         await enterGameFullscreen();
     };
+
+    /* =========================================================
+       PLAYER 2 LOAD GAME FROM THEIR OWN DEVICE
+    ========================================================= */
+
+    guestLoadButton.onclick=()=>{
+        if(isOwner) return;
+        /* P2 is allowed to load independently of P1. */
+        unlockAudio();
+        guestRomInput.value="";
+        guestRomInput.click();
+    };
+
+    guestRomInput.addEventListener("change",async event=>{
+        if(isOwner) return;
+        const file=event.target.files[0];
+        if(!file) return;
+        try{
+            guestLoadButton.disabled=true;
+            guestLoadStatus.textContent="READING YOUR ROM...";
+            const buffer=await file.arrayBuffer();
+            const bytes=new Uint8Array(buffer);
+            if(!isValidNES(bytes)) throw new Error("INVALID NES ROM");
+            const hash=await sha256Hex(bytes);
+            if(romInfo && romInfo.size && bytes.length!==romInfo.size) throw new Error("THIS IS NOT THE SAME ROM AS PLAYER 1");
+            if(romInfo && romInfo.hash && hash!==romInfo.hash) throw new Error("THIS IS NOT THE SAME ROM AS PLAYER 1");
+            if(!loadNES(bytes)) throw new Error("COULD NOT LOAD GAME");
+            romBytes=new Uint8Array(bytes);
+            localRomHash=hash;
+            romInfo = romInfo || {name:file.name,size:bytes.length,hash:hash};
+            romReceived=true; romLoaded=true; gameRunning=false; gamePaused=false; player2Ready=false; emuFrameNumber=0;
+            player2RomInfo = {name:file.name,size:bytes.length,hash:hash};
+            guestLoadStatus.textContent="GAME LOADED FROM YOUR DEVICE — OWNER WILL START BOTH";
+            p2Status.textContent="GAME LOADED"; p2Status.classList.add("ready");
+            setProgress(100,"PLAYER 2 GAME LOADED");
+            gameState.textContent="READY";
+            overlay("PLAYER 2 LOADED THE GAME<br><br>WAITING FOR PLAYER 1");
+            addMessage("SYSTEM","PLAYER 2 LOADED THE GAME FROM THEIR DEVICE",true);
+            showNotification("PLAYER 2 LOADED THE GAME");
+            sendData({type:"p2-rom-ready",name:file.name,size:bytes.length,hash:hash});
+
+            /* If P1 has already loaded the same ROM, both are ready now. */
+            if(romInfo && romInfo.hash === hash && Number(romInfo.size) === bytes.length){
+                player2Ready=true;
+                guestLoadStatus.textContent="BOTH PLAYERS LOADED THE SAME GAME";
+                overlay("GAME LOADED TO BOTH PLAYERS<br><br>OWNER CAN START");
+                showNotification("BOTH PLAYERS LOADED THE GAME — OWNER CAN START");
+                sendData({type:"rom-ready",name:file.name,size:bytes.length,hash:hash});
+            }
+            updateButtons();
+        }catch(error){
+            console.error("PLAYER 2 LOCAL ROM:",error);
+            romBytes=null; romLoaded=false; player2Ready=false; guestLoadButton.disabled=false;
+            guestLoadStatus.textContent=error.message||"COULD NOT LOAD GAME";
+            overlay("COULD NOT LOAD GAME<br><br>CHOOSE THE SAME ROM FILE");
+            toast(error.message||"COULD NOT LOAD GAME");
+            updateButtons();
+        }
+    });
 
     /* =========================================================
        START GAME
@@ -2926,41 +3229,68 @@
            button click, then start the local emulator.
         */
 
-        enterGameFullscreen();
-        startLocalGame();
-
-
-        /*
-           Tell Player 2 to start.
-        */
-
-        if(
-            connected &&
-            dataConnection &&
-            dataConnection.open
-        ){
-
-            sendData({
-                type:
-                    "game-start"
-            });
-
-
-            addMessage(
-                "SYSTEM",
-                "GAME STARTED",
-                true
-            );
-
-        }else{
-
-            toast(
-                "PLAYER 2 IS NOT CONNECTED"
-            );
-
+        if(!(connected && dataConnection && dataConnection.open)){
+            toast("PLAYER 2 IS NOT CONNECTED");
+            return;
         }
 
+        if(!player2Ready){
+            toast("WAIT FOR PLAYER 2 TO LOAD THE SAME GAME");
+            return;
+        }
+
+        /*
+           Start both local emulators from the same countdown.
+           No video is streamed: each browser renders its own ROM.
+           The countdown absorbs normal PeerJS network latency and
+           makes the visible start much more simultaneous.
+        */
+        const delay = 1400;
+        const token = (++syncStartToken) + "-" + Date.now();
+        scheduleSynchronizedStart(delay, token);
+
+        sendData({
+            type: "game-start",
+            delay,
+            token,
+            frame: 0
+        });
+
+        addMessage("SYSTEM", "GAME STARTING FOR BOTH PLAYERS — SYNC ACTIVE", true);
+        showNotification("GAME STARTING FOR BOTH PLAYERS");
+
     };
+
+
+    /* =========================================================
+       SYNCHRONIZED START
+    ========================================================= */
+
+    function scheduleSynchronizedStart(delay=1400, token="") {
+        if(!romBytes || !nes){
+            if(romBytes && !loadNES(romBytes)){
+                toast("COULD NOT LOAD GAME");
+                return false;
+            }
+        }
+
+        if(synchronizedStartTimer){
+            clearTimeout(synchronizedStartTimer);
+            synchronizedStartTimer = null;
+        }
+
+        const wait = Math.max(0, Number(delay) || 1400);
+        synchronizedStartTimer = setTimeout(()=>{
+            synchronizedStartTimer = null;
+            if(!romBytes) return;
+            startLocalGame();
+            showNotification("GAME RUNNING — BOTH PLAYERS SYNCED");
+        }, wait);
+
+        gameState.textContent = "STARTING...";
+        overlay("GET READY<br><br>GAME STARTING");
+        return true;
+    }
 
 
     /* =========================================================
@@ -2969,26 +3299,18 @@
 
     function startLocalGame(){
 
-        if(!romBytes)
-            return;
+        if(!romBytes){
+            console.warn("START REQUESTED BEFORE ROM WAS LOADED");
+            return false;
+        }
 
-
+        /* Every browser runs its own copy of the ROM.
+           Player 2 must load it locally before starting. */
         if(!nes){
-
-            if(
-                !loadNES(
-                    romBytes
-                )
-            ){
-
-                toast(
-                    "COULD NOT LOAD GAME"
-                );
-
-                return;
-
+            if(!loadNES(romBytes)){
+                toast("COULD NOT LOAD GAME");
+                return false;
             }
-
         }
 
 
@@ -3001,6 +3323,18 @@
         gamePaused =
             false;
 
+        emuFrameNumber = 0;
+        lastSyncSentFrame = 0;
+        authoritativeTargetFrame = 0;
+        resetSyncState();
+
+        if(!isOwner){
+            sendData({
+                type:"input-state",
+                player:localPlayer,
+                state:{...controllerState[localPlayer]}
+            });
+        }
 
         gameState.textContent =
             "RUNNING";
@@ -3138,11 +3472,9 @@
         if(!romBytes)
             return;
 
-        if(!isOwner){
-            gameRunning=true; gamePaused=false; gameState.textContent="RUNNING"; overlay(""); updateButtons(); return;
-        }
-
-
+        /* Both players reset their own local emulator from the
+           same ROM. This keeps restart synchronized without video
+           streaming. */
         if(
             !loadNES(
                 romBytes
@@ -3164,6 +3496,10 @@
         gamePaused =
             false;
 
+        emuFrameNumber = 0;
+        lastSyncSentFrame = 0;
+        authoritativeTargetFrame = 0;
+        resetSyncState();
 
         gameState.textContent =
             "RUNNING";
@@ -3224,103 +3560,48 @@
        Arrow keys + X + C.
     */
 
-    document.addEventListener(
-        "keydown",
-        event=>{
+    document.addEventListener("keydown", event=>{
+        const tag = event.target && event.target.tagName;
+        if(tag === "INPUT" || tag === "TEXTAREA" || event.target.isContentEditable) return;
+        const button = keyToButton(event.key);
+        if(!button) return;
+        event.preventDefault();
+        unlockAudio();
+        if(localKeys[button]) return;
 
-            const tag = event.target && event.target.tagName;
-            if(tag === "INPUT" || tag === "TEXTAREA" || event.target.isContentEditable) return;
+        localKeys[button]=true;
+        setControllerState(localPlayer, button, true);
 
-            const button =
-                keyToButton(
-                    event.key
-                );
-
-
-            if(!button)
-                return;
-
-
-            event.preventDefault();
-
-
-            unlockAudio();
-
-
-            if(
-                localKeys[button]
-            )
-                return;
-
-
-            localKeys[button] =
-                true;
-
-
-            if(isOwner){
-                applyInput(button,true,localPlayer);
-            }
-
+        /* During play, inputs are state messages. They are NOT applied
+           immediately. The host includes the state in the authoritative
+           frame packet, so both emulators consume it on the same frame. */
+        if(!isOwner || gameRunning){
             sendData({
-
-                type:
-                    "input",
-
-                button:
-                    button,
-
-                pressed:
-                    true
-
+                type:"input-state",
+                player:localPlayer,
+                state:{...controllerState[localPlayer]}
             });
-
         }
-    );
+    });
 
+    document.addEventListener("keyup", event=>{
+        const tag = event.target && event.target.tagName;
+        if(tag === "INPUT" || tag === "TEXTAREA" || event.target.isContentEditable) return;
+        const button = keyToButton(event.key);
+        if(!button) return;
+        event.preventDefault();
 
-    document.addEventListener(
-        "keyup",
-        event=>{
+        localKeys[button]=false;
+        setControllerState(localPlayer, button, false);
 
-            const tag = event.target && event.target.tagName;
-            if(tag === "INPUT" || tag === "TEXTAREA" || event.target.isContentEditable) return;
-
-            const button =
-                keyToButton(
-                    event.key
-                );
-
-
-            if(!button)
-                return;
-
-
-            event.preventDefault();
-
-
-            localKeys[button] =
-                false;
-
-
-            if(isOwner){
-                applyInput(button,false,localPlayer);
-            }
-
+        if(!isOwner || gameRunning){
             sendData({
-
-                type:
-                    "input",
-
-                button:
-                    button,
-
-                pressed:
-                    false
-
+                type:"input-state",
+                player:localPlayer,
+                state:{...controllerState[localPlayer]}
             });
-
         }
-    );
+    });
 
 
     /* =========================================================
@@ -3471,50 +3752,12 @@
     const ROM_CHUNK_SIZE =
         12 * 1024;
 
-    /* HOST-AUTHORITATIVE VIDEO SYNC */
-    let streamFrameNumber = 0;
-    let streamBusy = false;
-    let lastStreamTime = 0;
-    let pendingScreenFrame = false;
-    const STREAM_EVERY_MS = 1000 / 30;
-
-    function streamCurrentFrame(){
-        if(!isOwner || !connected || !dataConnection || !dataConnection.open || gamePaused || !gameRunning || streamBusy) return;
-        const now=performance.now();
-        if(now-lastStreamTime<STREAM_EVERY_MS) return;
-        lastStreamTime=now; streamBusy=true;
-        canvas.toBlob(blob=>{
-            if(!blob){streamBusy=false;return;}
-            blob.arrayBuffer().then(buffer=>{
-                if(dataConnection && dataConnection.open){
-                    try{
-                        dataConnection.send({type:"screen-frame",frame:streamFrameNumber});
-                        setTimeout(()=>{ if(dataConnection && dataConnection.open) dataConnection.send(buffer); streamBusy=false; },0);
-                        return;
-                    }catch(e){}
-                }
-                streamBusy=false;
-            }).catch(()=>{streamBusy=false;});
-        },"image/webp",0.92);
-    }
-
-    function showStreamedFrame(buffer){
-        if(isOwner || !buffer) return;
-        const blob=new Blob([buffer],{type:"image/webp"});
-        if(window.createImageBitmap){
-            createImageBitmap(blob).then(bitmap=>{
-                ctx.imageSmoothingEnabled=false;
-                ctx.clearRect(0,0,256,240);
-                ctx.drawImage(bitmap,0,0,256,240);
-                bitmap.close();
-            }).catch(()=>{});
-        }else{
-            const url=URL.createObjectURL(blob), img=new Image();
-            img.onload=()=>{ctx.imageSmoothingEnabled=false;ctx.clearRect(0,0,256,240);ctx.drawImage(img,0,0,256,240);URL.revokeObjectURL(url);};
-            img.src=url;
-        }
-    }
-
+    /* =========================================================
+       LOCAL DUAL-EMULATOR SYNC
+       Both players load and render the same ROM locally.
+       Inputs are exchanged over PeerJS and the host sends
+       periodic frame ticks to correct small timing drift.
+       ========================================================= */
 
     /* =========================================================
        SEND ROM
@@ -3880,6 +4123,13 @@
 
         };
 
+
+        romReceived = false;
+        romLoaded = false;
+        player2Ready = false;
+        guestControls.style.display = "block";
+        guestLoadButton.disabled = false;
+        guestLoadStatus.textContent = "LOAD GAME FROM YOUR DEVICE";
 
         setProgress(
             0,
@@ -4426,59 +4676,87 @@
 
 
             /*
-               Load it locally.
+               IMPORTANT:
+               Player 2 automatically loads the exact same ROM as soon
+               as the transfer is complete. There is NO second-player
+               load button anymore: loading is a shared operation.
+               Player 1 can start only after Player 2 confirms that its
+               local emulator has successfully loaded the ROM.
             */
 
-            const loaded =
-                loadNES(
-                    romBytes
-                );
-
-
-            if(!loaded){
-
-                throw new Error(
-                    "PLAYER 2 COULD NOT LOAD ROM"
-                );
-
-            }
-
-
-            romLoaded =
-                true;
-
+            romReceived = true;
+            romLoaded = false;
+            gameRunning = false;
+            gamePaused = false;
 
             setProgress(
                 100,
-                "GAME READY"
+                "GAME RECEIVED — LOADING BOTH PLAYERS"
             );
 
+            guestControls.style.display = "block";
+            guestLoadButton.style.display = "none";
+            guestLoadButton.disabled = true;
+            guestLoadStatus.textContent =
+                "LOADING GAME TO BOTH PLAYERS...";
 
             overlay(
-                "GAME READY<br><br>" +
-                "WAITING FOR OWNER"
+                "LOADING GAME...<br><br>" +
+                "PLAYER 2 IS STARTING THE SAME ROM"
             );
-
 
             addMessage(
                 "SYSTEM",
-                "GAME RECEIVED — READY",
+                "GAME RECEIVED — LOADING LOCALLY",
                 true
             );
 
+            showNotification("LOADING GAME TO BOTH PLAYERS");
 
-            /*
-               Confirm to owner.
-            */
+            /* Load the ROM immediately on Player 2. */
+            if(!loadNES(romBytes)){
 
+                sendData({
+                    type: "rom-error",
+                    id: romTransfer.id,
+                    reason: "PLAYER_2_LOAD_FAILED"
+                });
+
+                guestLoadStatus.textContent =
+                    "PLAYER 2 COULD NOT LOAD THE GAME";
+
+                overlay("PLAYER 2 COULD NOT LOAD GAME");
+                toast("PLAYER 2 COULD NOT LOAD GAME");
+                return;
+            }
+
+            romLoaded = true;
+            gameRunning = false;
+            gamePaused = false;
+            emuFrameNumber = 0;
+
+            guestLoadStatus.textContent =
+                "GAME LOADED ON BOTH PLAYERS — WAITING FOR OWNER";
+
+            p2Status.textContent = "GAME LOADED";
+            p2Status.classList.add("ready");
+
+            setProgress(100, "GAME LOADED ON BOTH PLAYERS");
+            gameState.textContent = "READY";
+            overlay("GAME LOADED TO BOTH PLAYERS<br><br>OWNER CAN START");
+
+            addMessage(
+                "SYSTEM",
+                "GAME LOADED TO BOTH PLAYERS — OWNER CAN START",
+                true
+            );
+
+            showNotification("GAME LOADED TO BOTH PLAYERS");
+
+            /* Confirm to Player 1 that P2's local emulator is ready. */
             sendData({
-
-                type:
-                    "rom-ready",
-
-                id:
-                    romTransfer.id
-
+                type: "rom-ready",
+                id: romTransfer.id
             });
 
 
@@ -4535,27 +4813,38 @@
         if(!isOwner)
             return;
 
-        player2Ready = true;
+        if(romInfo && data.hash && romInfo.hash && data.hash !== romInfo.hash){
+            player2Ready = false;
+            p2Status.textContent = "WRONG GAME";
+            overlay("PLAYER 2 LOADED A DIFFERENT GAME");
+            showNotification("PLAYER 2 MUST LOAD THE SAME ROM");
+            toast("PLAYER 2 LOADED A DIFFERENT ROM");
+            updateButtons();
+            return;
+        }
 
+        player2Ready = true;
 
         setProgress(
             100,
-            "PLAYER 2 READY"
+            "PLAYER 2 LOADED"
         );
 
+        p2Status.textContent = "GAME LOADED";
+        p2Status.classList.add("ready");
 
         overlay(
-            "PLAYER 2 READY<br><br>" +
-            "PRESS START"
+            "GAME LOADED TO BOTH PLAYERS<br><br>" +
+            "PRESS START TO PLAY TOGETHER"
         );
-
 
         addMessage(
             "SYSTEM",
-            "PLAYER 2 LOADED THE GAME",
+            "GAME LOADED TO BOTH PLAYERS — OWNER CAN START",
             true
         );
 
+        showNotification("GAME LOADED TO BOTH PLAYERS — OWNER CAN START");
         updateButtons();
 
     }
@@ -4642,23 +4931,22 @@
 
     function processIncomingData(data){
 
-        if(data instanceof ArrayBuffer){
-            if(!isOwner && pendingScreenFrame){ pendingScreenFrame=false; showStreamedFrame(data); return; }
-            receiveBinaryChunk(data);
+        if(data && data.type === "rom-binary"){
+            handleIncomingMessage(data);
             return;
         }
 
+        if(data instanceof ArrayBuffer){
+            receiveBinaryChunk(data);
+            return;
+        }
 
         if(data instanceof Uint8Array){
-            if(!isOwner && pendingScreenFrame){ pendingScreenFrame=false; showStreamedFrame(data.buffer); return; }
             receiveBinaryChunk(data);
             return;
         }
 
-
-        handleData(
-            data
-        );
+        handleData(data);
 
     }
 
@@ -4819,8 +5107,9 @@
     }
 
 
-    function showNotification(){
+    function showNotification(text = "NEW MESSAGE"){
 
+        notification.textContent = text;
         notification.classList.add(
             "show"
         );
@@ -4913,27 +5202,25 @@
 
         if(!isOwner){
 
-            ownerControls.style.display =
-                "none";
-
+            ownerControls.style.display = "none";
+            guestControls.style.display = "block";
+            guestLoadButton.style.display = "inline-block";
+            /* P2 can choose the ROM independently, even before P1 loads. */
+            guestLoadButton.disabled = !!romLoaded || gameRunning;
             return;
 
         }
 
-
-        ownerControls.style.display =
-            "block";
-
+        ownerControls.style.display = "block";
+        guestControls.style.display = "none";
 
         startButton.disabled =
             !romLoaded ||
             !connected ||
-            !player2Ready;
+            !player2Ready ||
+            gameRunning;
 
-
-        pauseButton.disabled =
-            !gameRunning;
-
+        pauseButton.disabled = !gameRunning;
 
         restartButton.disabled =
             !romLoaded ||
@@ -5102,6 +5389,8 @@
 
             romLoaded =
                 false;
+            romReceived = false;
+            player2Ready = false;
 
             nes =
                 null;
@@ -5178,8 +5467,9 @@
        FINAL INITIALIZATION
     ========================================================= */
 
-    ownerControls.style.display =
-        "none";
+    ownerControls.style.display = "none";
+    guestControls.style.display = "none";
+    guestLoadButton.disabled = true;
 
 
     overlay(
@@ -5678,74 +5968,8 @@
     */
 
 
-    /*
-       Monkey patch setupConnection calls by intercepting
-       the global function isn't possible after lexical
-       binding, so we use an additional listener whenever
-       dataConnection is created.
-
-       This is done by watching it periodically.
-    */
-
-    let watchedConnection =
-        null;
-
-
-    setInterval(
-        ()=>{
-
-            if(
-                dataConnection &&
-                dataConnection !==
-                watchedConnection
-            ){
-
-                watchedConnection =
-                    dataConnection;
-
-
-                /*
-                   Add an additional listener specifically
-                   for ROM binary messages.
-
-                   Normal messages are harmlessly ignored.
-                */
-
-                dataConnection.on(
-                    "data",
-                    data=>{
-
-                        if(
-                            data &&
-                            data.type ===
-                            "rom-binary"
-                        ){
-                            handleIncomingMessage(data);
-                            return;
-                        }
-
-                        /* The owner sends a frame marker followed by
-                           the binary image. Show that image on Player 2. */
-                        if(
-                            !isOwner &&
-                            pendingScreenFrame &&
-                            (data instanceof ArrayBuffer ||
-                             data instanceof Uint8Array ||
-                             data instanceof Blob)
-                        ){
-                            pendingScreenFrame = false;
-                            showStreamedFrame(data);
-                        }
-
-                    }
-                );
-
-            }
-
-        },
-        100
-    );
-
+    /* Binary ROM packets are handled directly by
+       processIncomingData(). No screenshot/video listener is needed. */
 
     /* =========================================================
        INITIAL STATE
