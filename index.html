@@ -369,8 +369,8 @@
             border:0;
             opacity:1 !important;
             visibility:visible !important;
-            box-shadow:0 0 36px rgba(255,255,255,.16);
-            filter:brightness(2.20) saturate(1.10) contrast(1.10) opacity(1);
+            box-shadow:0 0 36px rgba(0,255,213,.14);
+            filter:brightness(1.06) saturate(1.38) contrast(1.08) opacity(1);
             image-rendering:pixelated;
             image-rendering:crisp-edges;
             image-rendering:-moz-crisp-edges;
@@ -383,6 +383,7 @@
             height:100vh;
             padding:0;
             background:#000;
+            cursor:none;
         }
 
         .screen:fullscreen #nesCanvas, .screen:-webkit-full-screen #nesCanvas{
@@ -1175,6 +1176,7 @@
     const canvas = $("nesCanvas");
     const ctx = canvas.getContext("2d", { alpha:false, desynchronized:true });
     ctx.imageSmoothingEnabled = false;
+    ctx.globalCompositeOperation = "copy";
 
     const messages = $("messages");
     const chatText = $("chatText");
@@ -1246,6 +1248,85 @@
     */
 
     const localKeys = {};
+
+    /* =========================================================
+       GAMEPAD SUPPORT
+       First connected controller controls the local player.
+       Buttons are translated to the same deterministic input state
+       used by keyboard input, so online synchronization stays intact.
+    ========================================================= */
+    let activeGamepadIndex = null;
+    let previousGamepadState = {};
+    let gamepadPollTimer = null;
+
+    function getGamepadButtonState(gp){
+        const b = i => !!(gp.buttons[i] && gp.buttons[i].pressed);
+        const axes = gp.axes || [];
+        const dead = 0.35;
+        return {
+            up: b(12) || (axes[1] < -dead),
+            down: b(13) || (axes[1] > dead),
+            left: b(14) || (axes[0] < -dead),
+            right: b(15) || (axes[0] > dead),
+            x: b(0),
+            c: b(1),
+            start: b(9),
+            select: b(8)
+        };
+    }
+
+    function pollGamepad(){
+        const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+        let gp = null;
+        if(activeGamepadIndex !== null && pads[activeGamepadIndex]){
+            gp = pads[activeGamepadIndex];
+        } else {
+            for(let i=0;i<pads.length;i++){
+                if(pads[i]){ activeGamepadIndex=i; gp=pads[i]; break; }
+            }
+        }
+        if(!gp){
+            previousGamepadState = {};
+            return;
+        }
+
+        const state = getGamepadButtonState(gp);
+        for(const button of syncButtons){
+            const next = !!state[button];
+            const old = !!previousGamepadState[button];
+            if(next === old) continue;
+            setControllerState(localPlayer, button, next);
+            if(!isOwner || gameRunning){
+                sendData({
+                    type:"input-state",
+                    player:localPlayer,
+                    state:{...controllerState[localPlayer]}
+                });
+            }
+        }
+        previousGamepadState = state;
+    }
+
+    function startGamepadPolling(){
+        if(gamepadPollTimer) return;
+        gamepadPollTimer = setInterval(pollGamepad, 16);
+    }
+
+    window.addEventListener("gamepadconnected", event=>{
+        activeGamepadIndex = event.gamepad.index;
+        previousGamepadState = {};
+        startGamepadPolling();
+        toast("GAMEPAD CONNECTED — PLAYER " + localPlayer);
+    });
+
+    window.addEventListener("gamepaddisconnected", event=>{
+        if(event.gamepad.index === activeGamepadIndex){
+            activeGamepadIndex = null;
+            previousGamepadState = {};
+        }
+    });
+
+    startGamepadPolling();
 
     /* =========================================================
        DETERMINISTIC ONLINE LOCKSTEP
@@ -3110,7 +3191,7 @@
 
     async function enterGameFullscreen(){
         try{
-            const target = document.querySelector(".screen");
+            const target = document.getElementById("room");
 
             if(document.fullscreenElement)
                 return;
@@ -3128,8 +3209,23 @@
 
     screenFullscreenButton.onclick = async ()=>{
         unlockAudio();
-        await enterGameFullscreen();
+        try{
+            if(document.fullscreenElement){
+                await document.exitFullscreen();
+                return;
+            }
+            await enterGameFullscreen();
+        }catch(error){
+            console.warn("Fullscreen toggle:", error);
+        }
     };
+
+    document.addEventListener("fullscreenchange", ()=>{
+        const active = !!document.fullscreenElement;
+        screenFullscreenButton.textContent = active ? "EXIT FULLSCREEN" : "FULLSCREEN";
+        const help = document.getElementById("fullscreenHelp");
+        if(help) help.style.display = active ? "none" : "block";
+    });
 
     /* =========================================================
        PLAYER 2 LOAD GAME FROM THEIR OWN DEVICE
@@ -3603,6 +3699,27 @@
         }
     });
 
+
+    function releaseAllLocalInputs(){
+        for(const button of syncButtons){
+            if(localKeys[button] || controllerState[localPlayer][button]){
+                localKeys[button]=false;
+                setControllerState(localPlayer, button, false);
+            }
+        }
+        if(!isOwner || gameRunning){
+            sendData({
+                type:"input-state",
+                player:localPlayer,
+                state:{...controllerState[localPlayer]}
+            });
+        }
+    }
+
+    window.addEventListener("blur", releaseAllLocalInputs);
+    document.addEventListener("visibilitychange", ()=>{
+        if(document.hidden) releaseAllLocalInputs();
+    });
 
     /* =========================================================
        APPLY INPUT
