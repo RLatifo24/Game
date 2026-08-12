@@ -1347,62 +1347,130 @@
     let activeGamepadIndex = null;
     let previousGamepadState = {};
     let gamepadPollTimer = null;
+    let gamepadState = {};
+
+    /*
+       GAMEPAD INPUT
+       - Uses the browser Standard Gamepad mapping when available.
+       - Supports D-pad and left stick.
+       - Uses hysteresis so an analog stick sitting near the dead-zone
+         cannot rapidly flip LEFT/RIGHT.
+       - Keyboard and gamepad states are kept separate; releasing a
+         gamepad button can never release a keyboard key that is still held.
+    */
+    const GAMEPAD_DEAD = 0.28;
+    const GAMEPAD_RELEASE = 0.18;
+
+    function axisDirection(value, negative, positive, previous){
+        if(previous) {
+            if(negative && value < -GAMEPAD_RELEASE) return true;
+            if(positive && value > GAMEPAD_RELEASE) return true;
+            return false;
+        }
+        if(negative) return value < -GAMEPAD_DEAD;
+        if(positive) return value > GAMEPAD_DEAD;
+        return false;
+    }
 
     function getGamepadButtonState(gp){
         const b = i => !!(gp.buttons[i] && gp.buttons[i].pressed);
         const axes = gp.axes || [];
-        const dead = 0.35;
+        const prev = previousGamepadState;
+
         return {
-            up: b(12) || (axes[1] < -dead),
-            down: b(13) || (axes[1] > dead),
-            left: b(14) || (axes[0] < -dead),
-            right: b(15) || (axes[0] > dead),
-            x: b(0),
-            c: b(1),
+            up: b(12) || axisDirection(Number(axes[1]) || 0, true, false, !!prev.up),
+            down: b(13) || axisDirection(Number(axes[1]) || 0, false, true, !!prev.down),
+            left: b(14) || axisDirection(Number(axes[0]) || 0, true, false, !!prev.left),
+            right: b(15) || axisDirection(Number(axes[0]) || 0, false, true, !!prev.right),
+            x: b(0),       // Standard Gamepad A = NES A
+            c: b(1),       // Standard Gamepad B = NES B
             start: b(9),
             select: b(8)
         };
     }
 
+    function mergeLocalInputSources(gameState){
+        /*
+          A button is considered held when either keyboard/touch OR the
+          gamepad holds it. This prevents one device from releasing the
+          other device's input.
+        */
+        const merged = {};
+        for(const button of syncButtons){
+            merged[button] =
+                !!controllerState[localPlayer][button] ||
+                !!gameState[button];
+        }
+
+        if(merged.up && merged.down){
+            if(gameState.up && !gameState.down) merged.down = false;
+            else merged.up = false;
+        }
+        if(merged.left && merged.right){
+            if(gameState.left && !gameState.right) merged.right = false;
+            else merged.left = false;
+        }
+        return merged;
+    }
+
     function pollGamepad(){
         const pads = navigator.getGamepads ? navigator.getGamepads() : [];
         let gp = null;
+
         if(activeGamepadIndex !== null && pads[activeGamepadIndex]){
             gp = pads[activeGamepadIndex];
         } else {
             for(let i=0;i<pads.length;i++){
-                if(pads[i]){ activeGamepadIndex=i; gp=pads[i]; break; }
+                if(pads[i]){
+                    activeGamepadIndex = i;
+                    gp = pads[i];
+                    break;
+                }
             }
         }
+
         if(!gp){
+            gamepadState = {};
             previousGamepadState = {};
             return;
         }
 
         const state = getGamepadButtonState(gp);
+        let changed = false;
+
         for(const button of syncButtons){
-            const next = !!state[button];
-            const old = !!previousGamepadState[button];
-            if(next === old) continue;
-            if(next){
-                const opposite = OPPOSITE_DIRECTION[button];
-                if(opposite && controllerState[localPlayer][opposite]){
-                    setControllerState(localPlayer, opposite, false);
-                }
-            }
-
-            setControllerState(localPlayer, button, next);
-
-            if(!isOwner || connected){
-                sendLocalInputState();
+            if(!!state[button] !== !!previousGamepadState[button]){
+                changed = true;
+                break;
             }
         }
+
+        if(changed){
+            gamepadState = state;
+
+            /*
+              Keep controllerState as the logical local state so the
+              emulator loop, keyboard, touch and network all consume the
+              exact same state.
+            */
+            const merged = mergeLocalInputSources(state);
+
+            if(merged.up && merged.down) merged.down = false;
+            if(merged.left && merged.right) merged.right = false;
+
+            for(const button of syncButtons){
+                controllerState[localPlayer][button] = !!merged[button];
+            }
+
+            sendLocalInputState();
+        }
+
         previousGamepadState = state;
     }
 
     function startGamepadPolling(){
         if(gamepadPollTimer) return;
-        gamepadPollTimer = setInterval(pollGamepad, 16);
+        gamepadPollTimer = setInterval(pollGamepad, 8);
     }
 
     window.addEventListener("gamepadconnected", event=>{
@@ -2729,36 +2797,13 @@
                         if(incoming.left) incoming.right = false;
                         if(incoming.right) incoming.left = false;
 
-                        /* P2 FIX: clear the old direction latch on release.
-                           Without this, RIGHT could remain latched for two
-                           frames after P2 pressed LEFT, causing wrong/random
-                           movement. */
-                        for(const button of syncButtons){
-                            if(incoming[button]){
-                                hostInputHoldUntil[button] = Math.max(
-                                    hostInputHoldUntil[button],
-                                    emuFrameNumber + MIN_INPUT_FRAMES
-                                );
-                            }else{
-                                hostInputHoldUntil[button] = 0;
-                            }
-                        }
-
                         controllerState[2] = incoming;
 
-                        /*
-                          Latch newly pressed buttons for at least two
-                          frames. This makes quick taps reliable without
-                          making a released key stay stuck.
-                        */
+                        /* Apply the newest complete P2 state immediately.
+                           No artificial frame latch: LEFT/RIGHT changes take
+                           effect on the very next host frame. */
                         for(const button of syncButtons){
-                            if(incoming[button]){
-                                hostInputHoldUntil[button] =
-                                    Math.max(
-                                        hostInputHoldUntil[button],
-                                        emuFrameNumber + MIN_INPUT_FRAMES
-                                    );
-                            }
+                            hostInputHoldUntil[button] = 0;
                         }
                     }
                 }
@@ -3262,57 +3307,47 @@
 
     function startEmulation(){
         stopEmulation();
-
         if(!nes) return;
 
-        /* P2 is not allowed to free-run. It advances only when the
-           authoritative host frame arrives over the reliable data
-           channel. This is what keeps both emulators on the same frame. */
-        if(!isOwner) return;
+        /*
+          BOTH browsers run their own JSNES clock at 60 FPS.
 
+          The old version made P2 wait for a host "sync-frame" before
+          advancing. That made every network/input delay visible as
+          3-5 frames of controller lag.
+
+          Now:
+          - local controls are applied immediately on the next local frame;
+          - P1/P2 input states are sent continuously;
+          - the host remains authoritative for the shared input stream;
+          - P2 receives host P1 snapshots and keeps local P2 prediction.
+        */
         frameTimer = setInterval(()=>{
             if(!gameRunning || gamePaused || !nes) return;
 
             try{
-                /* Apply P1 exactly as received. */
-
-                reconcileController(1, controllerState[1]);
-
-                /*
-                  P2 uses the latest ordered state. A short press is latched
-                  for two frames, but after the latch expires the RELEASED
-                  state is restored. Therefore P2 cannot start moving
-                  automatically from a stale key.
-                */
-                const p2FrameState = {...controllerState[2]};
-
-                for(const button of syncButtons){
-                    if(!p2FrameState[button] &&
-                       emuFrameNumber < hostInputHoldUntil[button]){
-                        p2FrameState[button] = true;
-                    }
+                if(isOwner){
+                    reconcileController(1, controllerState[1]);
+                    reconcileController(2, controllerState[2]);
+                }else{
+                    /*
+                      P2 is local/predicted. P1 is replaced by the latest
+                      authoritative host snapshot whenever one arrives.
+                    */
+                    reconcileController(1, controllerState[1]);
+                    reconcileController(2, controllerState[2]);
                 }
-
-                /* Final safety: never send two opposite directions in the same authoritative frame. */
-                if(p2FrameState.up) p2FrameState.down = false;
-                if(p2FrameState.down) p2FrameState.up = false;
-                if(p2FrameState.left) p2FrameState.right = false;
-                if(p2FrameState.right) p2FrameState.left = false;
-
-                reconcileController(2, p2FrameState);
 
                 nes.frame();
                 emuFrameNumber++;
 
-                /* Send the exact input snapshot AFTER the host has
-                   advanced this frame. P2 applies this snapshot and
-                   advances exactly one frame, in the same order. */
-                if(connected && dataConnection && dataConnection.open){
+                if(isOwner && connected && dataConnection && dataConnection.open){
                     sendData({
                         type:"sync-frame",
                         frame:emuFrameNumber,
                         p1:{...controllerState[1]},
-                        p2:{...p2FrameState}
+                        p2:{...controllerState[2]},
+                        p2Seq:hostLastP2InputSequence
                     });
                 }
             }catch(error){
@@ -3323,47 +3358,34 @@
 
     function applyAuthoritativeFrame(data){
         if(isOwner || !gameRunning || gamePaused || !nes) return;
-        const frame = Number(data.frame)||0;
-        if(frame <= syncLastAppliedFrame) return;
 
-        /* Reliable PeerJS preserves order, but keep a tiny queue so
-           temporary browser scheduling/network jitter cannot reorder the
-           local simulation. */
-        syncFrameQueue.push(data);
-        syncFrameQueue.sort((a,b)=>(Number(a.frame)||0)-(Number(b.frame)||0));
+        const frame = Number(data.frame) || 0;
+        if(frame <= syncLastReceivedFrame) return;
 
-        while(syncFrameQueue.length){
-            const next = syncFrameQueue[0];
-            const n = Number(next.frame)||0;
-            if(n <= syncLastAppliedFrame){
-                syncFrameQueue.shift();
-                continue;
-            }
-            if(n !== syncLastAppliedFrame + 1) break;
+        syncLastReceivedFrame = frame;
 
-            syncFrameQueue.shift();
-            controllerState[1] = {...controllerState[1], ...(next.p1||{})};
+        /*
+          Do NOT stop the local P2 clock while waiting for this packet.
+          Only P1 is corrected from the host snapshot. P2 keeps its
+          local input prediction so the controller remains instant.
+        */
+        if(data.p1){
+            const p1 = {...controllerState[1], ...data.p1};
 
-            /*
-              For P2, the frame packet is authoritative. This is the key
-              synchronization rule: both emulators receive the IDENTICAL
-              P2 input for frame N.
-            */
-            const authoritativeP2 = {...controllerState[2], ...(next.p2||{})};
-            controllerState[2] = authoritativeP2;
+            if(p1.up && p1.down) p1.down = false;
+            if(p1.left && p1.right) p1.right = false;
 
-            reconcileController(1, controllerState[1]);
-            reconcileController(2, authoritativeP2);
+            controllerState[1] = p1;
+        }
 
-            try{
-                nes.frame();
-                emuFrameNumber = n;
-                syncLastAppliedFrame = n;
-                syncLastReceivedFrame = n;
-            }catch(error){
-                console.error("P2 SYNC FRAME:",error);
-                break;
-            }
+        /*
+          If the host has already received the same P2 input sequence,
+          the local prediction and host state represent the same input.
+          Never overwrite a newer local P2 input.
+        */
+        const ack = Number(data.p2Seq) || 0;
+        if(ack && ack >= localInputSequence && data.p2){
+            controllerState[2] = {...controllerState[2], ...data.p2};
         }
     }
 
@@ -3914,6 +3936,9 @@
             }
 
             setControllerState(localPlayer, button, true);
+            if(gamepadState[button]){
+                setControllerState(localPlayer, button, true);
+            }
             sendLocalInputState();
         }
     }, {passive:false});
@@ -3942,7 +3967,7 @@
             }
         }
 
-        if(!stillHeld && controllerState[localPlayer][button]){
+        if(!stillHeld && !gamepadState[button] && controllerState[localPlayer][button]){
             setControllerState(localPlayer, button, false);
             sendLocalInputState();
         }
@@ -4055,11 +4080,9 @@
     let hostLastP2InputSequence = 0;
 
     /*
-      A very short key press can otherwise happen entirely between two
-      60 Hz frames. The host therefore keeps a pressed direction for at
-      least 2 emulator frames. Release is still immediate afterwards.
+      REAL-TIME INPUT: no artificial frame latch.
+      A direction is active exactly while the physical key is held.
     */
-    const MIN_INPUT_FRAMES = 2;
     const hostInputHoldUntil = {
         up:0, down:0, left:0, right:0,
         x:0, c:0, start:0, select:0
@@ -4095,7 +4118,7 @@
                     state:{...controllerState[localPlayer]}
                 });
             }
-        }, 100);
+        }, 16);
     }
 
     function stopInputHeartbeat(){
