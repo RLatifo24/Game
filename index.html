@@ -1394,11 +1394,7 @@
             setControllerState(localPlayer, button, next);
 
             if(!isOwner || connected){
-                sendData({
-                    type:"input-state",
-                    player:localPlayer,
-                    state:{...controllerState[localPlayer]}
-                });
+                sendLocalInputState();
             }
         }
         previousGamepadState = state;
@@ -1464,11 +1460,20 @@
 
     function resetSyncState(){
         pressedPhysicalKeys.clear();
+
+        localInputSequence = 0;
+        hostLastP2InputSequence = 0;
+
+        for(const button of syncButtons){
+            hostInputHoldUntil[button] = 0;
+        }
+
         for(const p of [1,2]){
             for(const b of syncButtons){
                 appliedControllerState[p][b]=false;
             }
         }
+
         syncFrameQueue=[];
         syncLastReceivedFrame=0;
         syncLastAppliedFrame=0;
@@ -2699,15 +2704,48 @@
 
             case "input-state":
                 if(isOwner && Number(data.player) === 2){
-                    const incoming = {...controllerState[2], ...(data.state||{})};
 
-                    /* Never allow contradictory directions. */
-                    if(incoming.up) incoming.down = false;
-                    if(incoming.down) incoming.up = false;
-                    if(incoming.left) incoming.right = false;
-                    if(incoming.right) incoming.left = false;
+                    const seq = Number(data.seq) || 0;
 
-                    controllerState[2] = incoming;
+                    /*
+                      Ignore an old/replayed packet. This is important when
+                      a heartbeat arrives after a newer keyup.
+                    */
+                    if(seq < hostLastP2InputSequence){
+                        break;
+                    }
+
+                    if(seq > hostLastP2InputSequence){
+                        hostLastP2InputSequence = seq;
+
+                        const incoming = {
+                            ...controllerState[2],
+                            ...(data.state || {})
+                        };
+
+                        /* Never allow contradictory directions. */
+                        if(incoming.up) incoming.down = false;
+                        if(incoming.down) incoming.up = false;
+                        if(incoming.left) incoming.right = false;
+                        if(incoming.right) incoming.left = false;
+
+                        controllerState[2] = incoming;
+
+                        /*
+                          Latch newly pressed buttons for at least two
+                          frames. This makes quick taps reliable without
+                          making a released key stay stuck.
+                        */
+                        for(const button of syncButtons){
+                            if(incoming[button]){
+                                hostInputHoldUntil[button] =
+                                    Math.max(
+                                        hostInputHoldUntil[button],
+                                        emuFrameNumber + MIN_INPUT_FRAMES
+                                    );
+                            }
+                        }
+                    }
                 }
                 break;
 
@@ -3221,9 +3259,26 @@
             if(!gameRunning || gamePaused || !nes) return;
 
             try{
-                /* Apply the exact controller state that this frame uses. */
+                /* Apply P1 exactly as received. */
+
                 reconcileController(1, controllerState[1]);
-                reconcileController(2, controllerState[2]);
+
+                /*
+                  P2 uses the latest ordered state. A short press is latched
+                  for two frames, but after the latch expires the RELEASED
+                  state is restored. Therefore P2 cannot start moving
+                  automatically from a stale key.
+                */
+                const p2FrameState = {...controllerState[2]};
+
+                for(const button of syncButtons){
+                    if(!p2FrameState[button] &&
+                       emuFrameNumber < hostInputHoldUntil[button]){
+                        p2FrameState[button] = true;
+                    }
+                }
+
+                reconcileController(2, p2FrameState);
 
                 nes.frame();
                 emuFrameNumber++;
@@ -3236,7 +3291,7 @@
                         type:"sync-frame",
                         frame:emuFrameNumber,
                         p1:{...controllerState[1]},
-                        p2:{...controllerState[2]}
+                        p2:{...p2FrameState}
                     });
                 }
             }catch(error){
@@ -3539,11 +3594,7 @@
         resetSyncState();
 
         if(!isOwner){
-            sendData({
-                type:"input-state",
-                player:localPlayer,
-                state:{...controllerState[localPlayer]}
-            });
+            sendLocalInputState();
         }
 
         gameState.textContent =
@@ -3800,11 +3851,7 @@
         /* P1's state is already local to the host.
            P2's state must be sent to the host immediately. */
         if(!isOwner || connected){
-            sendData({
-                type:"input-state",
-                player:localPlayer,
-                state:{...controllerState[localPlayer]}
-            });
+            sendLocalInputState();
         }
     }
 
@@ -3897,7 +3944,10 @@
         }
     }
 
-    window.addEventListener("blur", releaseAllLocalInputs);
+    window.addEventListener("blur", ()=>{
+        releaseAllLocalInputs();
+        sendLocalInputState();
+    });
 
     document.addEventListener("visibilitychange", ()=>{
         if(document.hidden){
@@ -3980,19 +4030,51 @@
        the authoritative host receive the latest direction quickly.
     */
     let inputHeartbeatTimer = null;
+    let localInputSequence = 0;
+    let hostLastP2InputSequence = 0;
+
+    /*
+      A very short key press can otherwise happen entirely between two
+      60 Hz frames. The host therefore keeps a pressed direction for at
+      least 2 emulator frames. Release is still immediate afterwards.
+    */
+    const MIN_INPUT_FRAMES = 2;
+    const hostInputHoldUntil = {
+        up:0, down:0, left:0, right:0,
+        x:0, c:0, start:0, select:0
+    };
+
+    function sendLocalInputState(){
+        if(!isOwner && connected && dataConnection && dataConnection.open){
+            localInputSequence++;
+
+            sendData({
+                type:"input-state",
+                player:localPlayer,
+                seq:localInputSequence,
+                state:{...controllerState[localPlayer]}
+            });
+        }
+    }
 
     function startInputHeartbeat(){
         if(inputHeartbeatTimer) return;
 
         inputHeartbeatTimer = setInterval(()=>{
+            /*
+              Heartbeat is deliberately slower than the previous version.
+              Input changes are sent immediately by sendLocalInputState().
+              Heartbeat only repairs a packet that was lost.
+            */
             if(!isOwner && connected && dataConnection && dataConnection.open){
                 sendData({
                     type:"input-state",
                     player:localPlayer,
+                    seq:localInputSequence,
                     state:{...controllerState[localPlayer]}
                 });
             }
-        }, 20);
+        }, 100);
     }
 
     function stopInputHeartbeat(){
