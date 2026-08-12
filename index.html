@@ -1384,12 +1384,14 @@
             const next = !!state[button];
             const old = !!previousGamepadState[button];
             if(next === old) continue;
-            setControllerState(localPlayer, button, next);
-
-            if(nes){
-                applyInput(button, next, localPlayer);
-                appliedControllerState[localPlayer][button] = next;
+            if(next){
+                const opposite = OPPOSITE_DIRECTION[button];
+                if(opposite && controllerState[localPlayer][opposite]){
+                    setControllerState(localPlayer, opposite, false);
+                }
             }
+
+            setControllerState(localPlayer, button, next);
 
             if(!isOwner || connected){
                 sendData({
@@ -2697,7 +2699,15 @@
 
             case "input-state":
                 if(isOwner && Number(data.player) === 2){
-                    controllerState[2] = {...controllerState[2], ...(data.state||{})};
+                    const incoming = {...controllerState[2], ...(data.state||{})};
+
+                    /* Never allow contradictory directions. */
+                    if(incoming.up) incoming.down = false;
+                    if(incoming.down) incoming.up = false;
+                    if(incoming.left) incoming.right = false;
+                    if(incoming.right) incoming.left = false;
+
+                    controllerState[2] = incoming;
                 }
                 break;
 
@@ -3257,9 +3267,17 @@
 
             syncFrameQueue.shift();
             controllerState[1] = {...controllerState[1], ...(next.p1||{})};
-            controllerState[2] = {...controllerState[2], ...(next.p2||{})};
+
+            /*
+              For P2, the frame packet is authoritative. This is the key
+              synchronization rule: both emulators receive the IDENTICAL
+              P2 input for frame N.
+            */
+            const authoritativeP2 = {...controllerState[2], ...(next.p2||{})};
+            controllerState[2] = authoritativeP2;
+
             reconcileController(1, controllerState[1]);
-            reconcileController(2, controllerState[2]);
+            reconcileController(2, authoritativeP2);
 
             try{
                 nes.frame();
@@ -3754,6 +3772,13 @@
 
     const pressedPhysicalKeys = new Set();
 
+    const OPPOSITE_DIRECTION = Object.freeze({
+        up:"down",
+        down:"up",
+        left:"right",
+        right:"left"
+    });
+
     function keyToButtonFromCode(code){
         const map = localPlayer === 1
             ? KEY_TO_BUTTON.p1
@@ -3806,18 +3831,21 @@
         pressedPhysicalKeys.add(event.code);
 
         if(!controllerState[localPlayer][button]){
-            setControllerState(localPlayer, button, true);
-
             /*
-              Apply locally IMMEDIATELY for zero extra frame of input lag.
-              The host still remains authoritative and sends the exact
-              state back in sync-frame packets.
+              Never apply a P2 keyboard event directly to the local
+              emulator. The host must execute the same input on the
+              same numbered frame on BOTH machines. Direct prediction
+              was causing an old host frame to temporarily overwrite a
+              new direction, which felt like RIGHT becoming LEFT.
             */
-            if(nes){
-                applyInput(button, true, localPlayer);
-                appliedControllerState[localPlayer][button] = true;
+
+            /* A player cannot have both directions active at once. */
+            const opposite = OPPOSITE_DIRECTION[button];
+            if(opposite && controllerState[localPlayer][opposite]){
+                setControllerState(localPlayer, opposite, false);
             }
 
+            setControllerState(localPlayer, button, true);
             sendLocalInputState();
         }
     }, {passive:false});
@@ -3848,13 +3876,6 @@
 
         if(!stillHeld && controllerState[localPlayer][button]){
             setControllerState(localPlayer, button, false);
-
-            /* Release locally immediately as well. */
-            if(nes){
-                applyInput(button, false, localPlayer);
-                appliedControllerState[localPlayer][button] = false;
-            }
-
             sendLocalInputState();
         }
     }, {passive:false});
@@ -3901,25 +3922,25 @@
         if(pressed){
             button.classList.add("pressed");
             if(!controllerState[localPlayer][logical]){
-                setControllerState(localPlayer, logical, true);
 
-                if(nes){
-                    applyInput(logical, true, localPlayer);
-                    appliedControllerState[localPlayer][logical] = true;
+                const opposite = OPPOSITE_DIRECTION[logical];
+                if(opposite && controllerState[localPlayer][opposite]){
+                    setControllerState(localPlayer, opposite, false);
+
+                    document.querySelectorAll("[data-touch]").forEach(el=>{
+                        if(el.dataset.touch === opposite){
+                            el.classList.remove("pressed");
+                        }
+                    });
                 }
 
+                setControllerState(localPlayer, logical, true);
                 sendLocalInputState();
             }
         }else{
             button.classList.remove("pressed");
             if(controllerState[localPlayer][logical]){
                 setControllerState(localPlayer, logical, false);
-
-                if(nes){
-                    applyInput(logical, false, localPlayer);
-                    appliedControllerState[localPlayer][logical] = false;
-                }
-
                 sendLocalInputState();
             }
         }
@@ -3950,6 +3971,38 @@
             setTouchButton(button, false);
         });
     });
+
+
+    /*
+       INPUT HEARTBEAT
+       The state is tiny, so while connected the guest repeats its current
+       state every 20 ms. This does NOT create emulator frames. It only makes
+       the authoritative host receive the latest direction quickly.
+    */
+    let inputHeartbeatTimer = null;
+
+    function startInputHeartbeat(){
+        if(inputHeartbeatTimer) return;
+
+        inputHeartbeatTimer = setInterval(()=>{
+            if(!isOwner && connected && dataConnection && dataConnection.open){
+                sendData({
+                    type:"input-state",
+                    player:localPlayer,
+                    state:{...controllerState[localPlayer]}
+                });
+            }
+        }, 20);
+    }
+
+    function stopInputHeartbeat(){
+        if(inputHeartbeatTimer){
+            clearInterval(inputHeartbeatTimer);
+            inputHeartbeatTimer = null;
+        }
+    }
+
+    startInputHeartbeat();
 
     /* =========================================================
        APPLY INPUT
