@@ -2729,6 +2729,21 @@
                         if(incoming.left) incoming.right = false;
                         if(incoming.right) incoming.left = false;
 
+                        /* P2 FIX: clear the old direction latch on release.
+                           Without this, RIGHT could remain latched for two
+                           frames after P2 pressed LEFT, causing wrong/random
+                           movement. */
+                        for(const button of syncButtons){
+                            if(incoming[button]){
+                                hostInputHoldUntil[button] = Math.max(
+                                    hostInputHoldUntil[button],
+                                    emuFrameNumber + MIN_INPUT_FRAMES
+                                );
+                            }else{
+                                hostInputHoldUntil[button] = 0;
+                            }
+                        }
+
                         controllerState[2] = incoming;
 
                         /*
@@ -3277,6 +3292,12 @@
                         p2FrameState[button] = true;
                     }
                 }
+
+                /* Final safety: never send two opposite directions in the same authoritative frame. */
+                if(p2FrameState.up) p2FrameState.down = false;
+                if(p2FrameState.down) p2FrameState.up = false;
+                if(p2FrameState.left) p2FrameState.right = false;
+                if(p2FrameState.right) p2FrameState.left = false;
 
                 reconcileController(2, p2FrameState);
 
